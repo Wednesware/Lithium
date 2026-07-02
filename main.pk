@@ -1,0 +1,2 @@
+print "hello, world" end::12
+return 0

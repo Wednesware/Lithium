@@ -1,0 +1,137 @@
+// this is a comment
+/*
+  more
+  lines
+*/
+
+set number to::30 // declare and set is a function too!
+
+if (number > 10) -> (
+    print "number is greater than 10"
+    elseif (number = 10) -> (
+        print "number is equal to 10"
+    )
+    else -> (
+        print "number is lower than 10"
+    )
+) // 'elseif' and 'else' are in 'if' to avoid giving 'if' special privileges ('if' passes 'elseif' and 'else' functions in its block)
+
+for i in::[3, 1, 4, 1, 5, 9] -> print i
+
+while (number > 10) -> set number to::(number - 1)
+
+fn* {
+    hello
+    arg::{"value" type::string default::"world"} // {} defines a map, which functions similarly to arguments of a function. you can pass key::value items, and items without a key are assigned to 'value'. repeating keys are made into a list just like arguments.
+    // `print*` makes the function into a different object (possibly mappedfunction) and allows the user to pass one or more map objects which are used as the arguments. example: `print* my_map my_other_map` or `print* {"hello, world!"}`. useful for repeated function calls/argument templates: `print* default_print_arguments {"hello, world!"}`
+    arg::{"times" type::integer default::1}
+    // fn doesn't need a function name. without passing a function name, it will use a random uuid. this acts like a lambda.
+    // block argument defines what happens with code in `-> ()`. passes a few arguments to the function. `-> ()` raises a syntax error if the block argument not passed. variables from the function itself (hello) after it runs are automatically passed to 'block'.
+    block::fn* {
+        arg::{"source" type::string} // source code of `-> ()`
+        arg::{"vars" type::map} // local variables in the block. you can append, remove and get. is a deep copy of the variables in the scope above this block and automatically updates after the 'block' argument in run.
+        arg::{"block" type::function} // the function itself to call the source code.
+    } -> (
+        fn goodbye -> print (string "goodbye, " value "!")
+        set vars.goodbye to::goodbye
+        return vars // required to return vars to properly update the scope in the block. does not affect the function's return itself.
+    )
+} -> ( // no longer has privileges, now has the same syntax as functions!
+    for* {
+        _
+        in::times
+    } -> (
+        print* {
+            string* {
+                "hello, "
+                value
+                "!"
+            }
+        }
+    )
+)
+hello* {
+    "felix"
+    times::3
+} -> (
+    call hello
+)
+
+print hello // no longer calls, rather prints the function object, use `print (call hello)` instead to call `hello`.
+
+match number -> (
+    case 10 -> (
+        print "number is 10"
+    )
+    case 20 -> (
+        print "number is 20"
+    )
+    else -> (
+        print "number is neither"
+    )
+)
+
+// perkeo is semi-object-oriented. `class` defines a map with special properties and automatically added items to imitate an object-oriented class. also creates a new type by adding the class to the built-in `runtime.types` list.
+// essentially created classes are just maps.
+// 'class' function passes 'constructor' and 'method' functions to its block, which both function similarly by passing an 'inst variable' for the object and only being callable on objects of the class.
+class Person -> (
+    declare is_alive as::true // true and false are just built-in variables with values 1 and 0 respectively. they print as 1 and 0 in the terminal too. none on the other hand is an object.
+    constructor arg::{"name" type::string} arg::{"age" type::integer default::1} -> (
+        public name # does exactly the same as `set inst.name to::name`
+        public age
+        set inst.is_adult to::(age >= 18)
+    )
+    method age_up arg::{"value" type::integer default::1} -> (
+        set inst.age to::(inst.age + value)
+    )
+)
+
+class Student extends::Person -> (
+    constructor* Person.constructor.arg arg::{"gpa" type::float default:4.0} -> ( // a trick that copies the 'arg' argument of `Person.constructor`. Because `function` stores its arguments as accessible maps, you can avoid repeating the same argument list and use the parent's arguments instead.
+        parent.constructor()
+        public gpa
+    )
+)
+
+declare person as::Person
+
+// `import` is a powerful function that uses different methods to retrieve libraries. you can use `runtime.import` (default method) to import perkeo files or `runtime.pythonimport` to convert python modules to perkeo libraries.
+// you can also pass custom functions as import methods to do custom actions.
+// optionally, use the `importlocal` keyword to pass `-> ()`. the library will only be accessible within the block.
+
+importlocal "other_file" -> ( // you can
+    print other_file:my_variable
+)
+import "math" method::runtime.pythonimport
+import "subprocess" method::runtime.pythonimport
+
+fn* {
+    githubimport
+    arg::{"value" type::string}
+} -> (
+    subprocess:run (string "git clone https://github.com/" value) shell::true
+    import value.split("/").at(1)
+)
+
+import "Wednesware/Magnesium" method::githubimport
+
+// libraries have the unique type 'library'
+
+try -> (
+    print (3 / 0)
+    catch error.zerodivision -> (
+        throw error.math note::"you can't divide by zero!"
+    )
+    catch -> (
+        return 0 // `return` exits the current block and replaces the function call with the value if used as an argument. this works for functions, loops, etc.
+        // if used outside of a block, ends the program.
+        // the keyword has a `layers` argument (default 1) which defines how many blocks this exits. you can pass -1 to exit all layers, including the program.
+    )
+)
+
+print (if (number > 23) -> (
+    else -> (
+        return "number" layers::2
+    )
+    return "number more than 23"
+))
