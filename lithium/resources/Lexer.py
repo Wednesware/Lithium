@@ -1,6 +1,6 @@
 type Token = any
 
-class V2Lexer:
+class Lexer:
     SIMPLE_TOKENS = {
         "(": "LPAREN",
         ")": "RPAREN",
@@ -78,7 +78,7 @@ class V2Lexer:
             raise self.LithiumSyntaxError(f"Unexpected character {char!r}", span)
 
         tokens.append(
-            self.lithium.res.tokens.V2Token(
+            self.lithium.res.Token(
                 "EOF",
                 None,
                 "",
@@ -131,7 +131,7 @@ class V2Lexer:
         line: int,
         column: int,
     ) -> Token:
-        return self.lithium.res.tokens.V2Token(
+        return self.lithium.res.Token(
             token_type,
             value,
             self.source[start:self.index],
@@ -152,7 +152,7 @@ class V2Lexer:
     def _newline(self) -> Token:
         start, line, column = self._mark()
         self._advance()
-        return self.lithium.res.tokens.V2Token(
+        return self.lithium.res.Token(
             "NEWLINE",
             "\n",
             self.source[start:self.index],

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class V2Token:
+class Token:
     type: str
     value: any
     text: str

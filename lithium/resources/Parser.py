@@ -2,7 +2,7 @@ from __future__ import annotations
 
 type Token = any
 
-class V2Parser:
+class Parser:
     VALUE_STARTERS = {
         "IDENTIFIER",
         "INTEGER",
@@ -44,7 +44,7 @@ class V2Parser:
     def tokens(self) -> list[Token]:
         if not self._tokens or self.content:
             self._log("Lexing source")
-            self._tokens = self.lithium.res.lexers.V2Lexer(self.lithium, self.content).tokenize()
+            self._tokens = self.lithium.res.Lexer(self.lithium, self.content).tokenize()
             self.last_tokens = self._tokens
             self._log(f"Lexed {len(self._tokens)} tokens")
         return self._tokens
@@ -501,4 +501,4 @@ def parse_lithium(
     preserve_comments: bool = True,
     lithium: any = None,
 ) -> dict[str, any]:
-    return V2Parser(lithium, content, preserve_comments=preserve_comments).parse()
+    return Parser(lithium, content, preserve_comments=preserve_comments).parse()

@@ -23,8 +23,6 @@ class Handler:
 
 class ScriptHandler(Handler):
     NAME: str = "scripts"
-    def __init__(self, project: Project):
-        self.project: Project = project
     def __getattr__(self, name: str) -> callable | handler: # type: ignore
         attribute_return: any = super().__getattr__(name) # type: ignore
         if isinstance(attribute_return, Handler):
@@ -35,8 +33,6 @@ class ScriptHandler(Handler):
     
 class ResourceHandler(Handler):
     NAME: str = "resources"
-    def __init__(self, project: Project):
-        self.project: Project = project
     def __getattr__(self, name: str) -> type | Handler:
         attribute_return: any = super().__getattr__(name) # type: ignore
         if isinstance(attribute_return, (type, Handler)):
