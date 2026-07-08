@@ -1,4 +1,6 @@
-class color:
+from __future__ import annotations
+
+class Color:
     reset: str = "\033[0m"
 
     bold: str = "\033[1m"
@@ -157,6 +159,6 @@ class color:
     def bg_rgb(r: int, g: int, b: int) -> str:
         return f"\033[48;2;{r};{g};{b}m"
 
-for name, (r, g, b) in color._CSS_COLORS.items():
-    setattr(color, f"rgb{name}", (r, g, b))
-    setattr(color, name, f"\033[38;2;{r};{g};{b}m")
+for name, (r, g, b) in Color._CSS_COLORS.items():
+    setattr(Color, f"rgb{name}", (r, g, b))
+    setattr(Color, name, f"\033[38;2;{r};{g};{b}m")

@@ -1,9 +1,11 @@
-from .color import color
+from __future__ import annotations
+
+from .color import Color
 
 
 class log:
     def __init__(self, text: str) -> None:
-        self.text: str = text + color.reset
+        self.text: str = text + Color.reset
         self.parent: "log | None" = None
         self.children: list[log] = []
         self.level: int = 0
@@ -46,9 +48,9 @@ class log:
             
 class error(log):
     def __init__(self, text: str) -> None:
-        super().__init__(f"{color.red}{text}")
+        super().__init__(f"{Color.red}{text}")
     @classmethod
     def from_exception(cls, exc: Exception) -> error:
-        log1: error = error(f"{color.red}{exc.__class__.__name__}{color.reset}")
-        log1.sublog(f"{color.red}{str(exc)}{color.reset}")
+        log1: error = error(f"{Color.red}{exc.__class__.__name__}{Color.reset}")
+        log1.sublog(f"{Color.red}{str(exc)}{Color.reset}")
         return log1

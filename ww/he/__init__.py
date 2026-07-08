@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 import importlib, importlib.util
-from ww.mg.config import objectnotation # type: ignore
-from ww.mg.filepath import filepath
+from ww.mg.config import ObjectNotation # type: ignore
+from ww.mg.filepath import FilePath
 
 class Handler:
     NAME: str = ""
@@ -53,4 +53,4 @@ class Project:
         self.res: ResourceHandler = ResourceHandler(self)
         self.metadata: dict[str, any] = {}
     def getsetting(self, name: str) -> str:
-        return objectnotation(filepath(self.path) / "settings.pyon").get(name)
+        return ObjectNotation(FilePath(self.path) / "settings.pyon").get(name)

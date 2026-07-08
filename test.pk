@@ -28,7 +28,6 @@ fn* {
     // fn doesn't need a function name. without passing a function name, it will use a random uuid. this acts like a lambda.
     // block argument defines what happens with code in `-> ()`. passes a few arguments to the function. `-> ()` raises a syntax error if the block argument not passed. variables from the function itself (hello) after it runs are automatically passed to 'block'.
     block::fn* {
-        arg::{"source" type::string} // source code of `-> ()`
         arg::{"vars" type::map} // local variables in the block. you can append, remove and get. is a deep copy of the variables in the scope above this block and automatically updates after the 'block' argument in run.
         arg::{"block" type::function} // the function itself to call the source code.
     } -> (
