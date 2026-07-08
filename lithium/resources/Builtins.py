@@ -53,9 +53,6 @@ class Builtins:
                 node,
             )
 
-        if value in interpreter.find_modules():
-            return interpreter.find_modules()[value]
-
         path = interpreter._resolve_module_path(value)
 
         if path is None:

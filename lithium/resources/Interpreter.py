@@ -11,14 +11,14 @@ class Interpreter:
             self,
             lithium,
             ast_or_parser: dict[str, any] | any,
-            output: callable | None = None,
+            output: callable | None = None
     ):
         self.lithium = lithium
         self.ast_or_parser = ast_or_parser
         self.output = output or print
         self.global_scope = self.lithium.res.Scope()
         self.builtins: dict[str, Builtin] = {}
-        self.modules: list
+        self.modules: list = []
         self.last_result = None
         self.install_defaults()
 
@@ -37,9 +37,6 @@ class Interpreter:
                 return path
 
         return None
-
-    def find_modules(self):
-        
 
     def operator_builtin(self, symbol, operation):
         def builtin(interpreter, node, args, scope):
@@ -199,6 +196,10 @@ class Interpreter:
 
     def evaluate_identifier(self, node: dict[str, any], scope: Scope) -> any:
         return scope.get(node["value"])
+    
+
+    def evaluate_identifierarg(self, node: dict[str, any], scope: Scope) -> str:
+        return node["value"]
 
 
     def evaluate_operator(self, node: dict[str, any], scope: Scope) -> str:
@@ -239,6 +240,8 @@ class Interpreter:
             return self._evaluate_operator_call(node, scope)
 
         target = self.evaluate(node["target"], scope)
+        if node.get("args").get("value").get("type") == "identifier":
+            node["args"]["value"]["type"] = "identifierarg"
         args = self.prepare_argument_map(
             node.get("args"),
             scope,
