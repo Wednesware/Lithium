@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import os
+
+
+type Builtin = any
+type Scope = any
+
 class Interpreter:
     def __init__(
             self,
@@ -15,31 +21,103 @@ class Interpreter:
         self.last_result = None
         self.install_defaults()
 
-    def import_function(self) -> None:
-        ...
+    def _resolve_module_path(self, name):
+        candidates = [
+            f"{name}.pk"
+        ]
 
-    def install_defaults(self) -> None:
+        for candidate in candidates:
+            path = os.path.join(
+                self.lithium.path,
+                candidate,
+            )
+
+            if os.path.exists(path):
+                return path
+
+        return None
+
+    def operator_builtin(self, symbol, operation):
+        def builtin(interpreter, node, args, scope):
+            values = args.get("value")
+
+            if not isinstance(values, list) or len(values) != 2:
+                raise interpreter.error(
+                    f"Operator {symbol!r} expects two operands",
+                    node,
+                )
+
+            left, right = values
+
+            try:
+                return operation(left, right)
+            except Exception as exc:
+                raise interpreter.error(
+                    str(exc),
+                    node,
+                ) from exc
+
+        return builtin
+
+    def install_defaults(self):
         self.global_scope.define("true", True, constant=True)
         self.global_scope.define("false", False, constant=True)
         self.global_scope.define("null", None, constant=True)
-        self.global_scope.define("import", self.import_function, constant=True)
+
+        self.register_builtin(
+            "call",
+            self.lithium.res.Builtins.call,
+        )
+        self.register_builtin(
+            "return",
+            self.lithium.res.Builtins.return_,
+        )
+        self.register_builtin(
+            "import",
+            self.lithium.res.Builtins.import_,
+        )
+
+        for symbol, operation in {
+            "+": lambda a,b:a+b,
+            "-": lambda a,b:a-b,
+            "*": lambda a,b:a*b,
+            "/": lambda a,b:a/b,
+            "%": lambda a,b:a%b,
+            "=": lambda a,b:a==b,
+            "==": lambda a,b:a==b,
+            "!=": lambda a,b:a!=b,
+            ">": lambda a,b:a>b,
+            ">=": lambda a,b:a>=b,
+            "<": lambda a,b:a<b,
+            "<=": lambda a,b:a<=b,
+        }.items():
+            self.register_builtin(
+                symbol,
+                self.operator_builtin(symbol, operation),
+            )
 
     def register_builtin(
-            self,
-            name: str,
-            handler: callable,
-            evaluate_args: bool = True,
-            pass_block: bool = False,
-    ) -> Builtin:
-        builtin = Builtin(
+        self,
+        name,
+        handler,
+        evaluate_args=True,
+        pass_block=False,
+    ):
+        info = self.lithium.res.Builtin(
+            handler,
+            evaluate_args,
+            pass_block,
+        )
+
+        self.builtins[name] = info
+
+        self.global_scope.define(
             name,
             handler,
-            evaluate_args=evaluate_args,
-            pass_block=pass_block,
+            constant=True,
         )
-        self.builtins[name] = builtin
-        self.global_scope.define(name, builtin, constant=True)
-        return builtin
+
+        return handler
 
     def run_code(self) -> any:
         ast = self.ast_or_parser
@@ -162,8 +240,26 @@ class Interpreter:
             evaluate=not isinstance(target, self.lithium.res.Builtin) or target.evaluate_args,
         )
 
-        if isinstance(target, self.lithium.res.Builtin):
-            return target(self, node, args, scope)
+        builtin = None
+
+        if node["target"]["type"] == "identifier":
+            builtin = self.builtins.get(
+                node["target"]["value"]
+            )
+
+        if builtin:
+            args = self.prepare_argument_map(
+                node.get("args"),
+                scope,
+                evaluate=builtin.evaluate_args,
+            )
+
+            return builtin.handler(
+                self,
+                node,
+                args,
+                scope,
+            )
         if callable(target):
             values = args["value"] if isinstance(args["value"], list) else [args["value"]]
             values = [] if args["value"] is None else values
@@ -175,7 +271,7 @@ class Interpreter:
     def prepare_argument_map(
             self,
             node: dict[str, any] | None,
-            scope: self.lithium.res.Scope,
+            scope: Scope,
             evaluate: bool = True,
     ) -> dict[str, any]:
         if node is None:

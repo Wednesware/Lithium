@@ -1,11 +1,22 @@
 class Scope:
-    def __init__(self, parent: "Scope | None" = None):
+    def __init__(
+        self,
+        parent=None,
+        lithium=None,
+    ):
         self.parent = parent
+        self.lithium = lithium or (
+            parent.lithium
+            if parent else None
+        )
         self.values: dict[str, any] = {}
         self.constants: set[str] = set()
 
-    def child(self) -> "Scope":
-        return self.lithium.res.Scope(self)
+    def child(self):
+        return self.lithium.res.Scope(
+            self,
+            self.lithium,
+        )
 
     def define(self, name: str, value: any, constant: bool = False) -> any:
         if name in self.constants:
