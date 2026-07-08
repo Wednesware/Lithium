@@ -1,8 +1,16 @@
+import os
+
 from sys import argv
+
 
 def runpk(lithium) -> None:
     if len(argv) < 2:
         raise SystemExit("Usage: python -m lithium <file.pk> [--ast]")
+
+    lithium.file_path = os.path.abspath(argv[1])
+
+    if os.path.exists(lithium.file_path):
+        raise SystemExit("File not found.")
 
     with open(argv[1]) as file:
         content: str = file.read()

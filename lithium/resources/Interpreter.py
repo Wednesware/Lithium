@@ -18,6 +18,7 @@ class Interpreter:
         self.output = output or print
         self.global_scope = self.lithium.res.Scope()
         self.builtins: dict[str, Builtin] = {}
+        self.modules: list
         self.last_result = None
         self.install_defaults()
 
@@ -36,6 +37,9 @@ class Interpreter:
                 return path
 
         return None
+
+    def find_modules(self):
+        
 
     def operator_builtin(self, symbol, operation):
         def builtin(interpreter, node, args, scope):
@@ -137,6 +141,7 @@ class Interpreter:
             return None
         scope = scope or self.global_scope
         node_type = node.get("type")
+        print(node, node_type)
         method = getattr(self, f"execute_{node_type}", None)
         if method is None:
             return self.evaluate(node, scope)
