@@ -354,7 +354,6 @@ class Parser:
         return result
 
     def _add_positional(self, result: dict[str, any], value: dict[str, any]) -> None:
-        print(result)
         if "value" not in result["map"]:
             result["map"]["value"] = value
         elif result["map"]["value"]["type"] == "array":

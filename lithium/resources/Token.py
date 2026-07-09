@@ -23,3 +23,13 @@ class Token:
             "end_line": self.end_line,
             "end_column": self.end_column,
         }
+    @staticmethod
+    def emptySpan() -> dict[str, int]:
+        return {
+            "start": 0,
+            "end": 0,
+            "line": 0,
+            "column": 0,
+            "end_line": 0,
+            "end_column": 0,
+        }

@@ -12,7 +12,7 @@ class ErrorHandler:
               f"{self.interpreter.lithium.source.splitlines()[self.interpreter.current_ast['span']['line'] - 1][self.interpreter.current_ast['span']['column'] - 1:self.interpreter.current_ast['span']['end_column']]}",
               f"{self.interpreter.lithium.source.splitlines()[self.interpreter.current_ast['span']['line'] - 1][self.interpreter.current_ast['span']['end_column']:len(self.interpreter.lithium.source)]}"
         )
-        print(f"* {Color.tomato}{os.path.basename(self.interpreter.lithium.file_path)}: {name} at line {self.interpreter.current_ast['span']['line']}, col {self.interpreter.current_ast['span']['line']}{Color.reset}")
+        print(f"* {Color.tomato}{os.path.basename(self.interpreter.lithium.file_path)}: {name} at line {self.interpreter.current_ast['span']['line']}, col {self.interpreter.current_ast['span']['column']}{Color.reset}")
         print(":")
         print(f"* {Color.tomato}{message}{Color.reset}")
         print()
