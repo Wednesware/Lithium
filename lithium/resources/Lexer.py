@@ -20,6 +20,7 @@ class Lexer:
         self.index = 0
         self.line = 1
         self.column = 1
+        self.eh = self.lithium.res.ErrorHandler(self)
 
     def __iter__(self) -> iter:
         return iter(self.tokenize())
@@ -75,7 +76,7 @@ class Lexer:
                 continue
 
             span = self._current_span()
-            raise self.LithiumSyntaxError(f"Unexpected character {char!r}", span)
+            self.eh.throwWithSpan("illegalSyntax", f"unexpected character {char!r}", span)
 
         tokens.append(
             self.lithium.res.Token(
@@ -184,8 +185,9 @@ class Lexer:
             self._advance()
 
         if self._at_end():
-            raise self.lithium.res.errors.LithiumSyntaxError(
-                "Unterminated block comment",
+            self.eh.throwWithSpan(
+                "illegalSyntax",
+                "unterminated block comment",
                 {
                     "start": start,
                     "end": self.index,
@@ -233,8 +235,9 @@ class Lexer:
                 continue
             chars.append(char)
 
-        raise self.lithium.res.errors.LithiumSyntaxError(
-            "Unterminated string",
+        self.eh.throwWithSpan(
+            "illegal syntax",
+            "unterminated string",
             {
                 "start": start,
                 "end": self.index,

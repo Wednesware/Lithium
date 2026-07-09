@@ -32,14 +32,18 @@ class Parser:
         self.index = 0
         self.last_tokens: list[Token] = self._tokens
         self.last_ast: dict[str, any] | None = None
+        self.eh = self.lithium.res.ErrorHandler(self)
 
     def parse(self) -> dict[str, any]:
-        self._ensure_tokens()
-        self.index = 0
-        self._log("Parsing AST")
-        self.last_ast = self.parse_script()
-        self._log("Parsed AST")
-        return self.last_ast
+        try:
+            self._ensure_tokens()
+            self.index = 0
+            self._log("Parsing AST")
+            self.last_ast = self.parse_script()
+            self._log("Parsed AST")
+            return self.last_ast
+        except Exception as err:
+            self.eh.throwNoTraceback("illegalSyntax", str(err))
 
     def tokens(self) -> list[Token]:
         if not self._tokens or self.content:
@@ -137,8 +141,9 @@ class Parser:
                 )
             )
             if self._at_stop(stop) or not self._starts_value():
-                raise self.lithium.res.errors.LithiumSyntaxError(
-                    f"Expected value after operator {operator_token.text!r}",
+                self.eh.throwWithSpan(
+                    "illegalSyntax",
+                    f"expected value after operator {operator_token.text!r}",
                     operator_token.span,
                 )
             items.append(self._parse_postfix(stop))
@@ -167,7 +172,7 @@ class Parser:
         token = self._peek()
 
         if token.type in stop:
-            raise self.lithium.res.errors.LithiumSyntaxError("Expected value", token.span)
+            self.eh.throwWithSpan("illegalSyntax", "expected value", token.span)
 
         if self._match("INTEGER"):
             return self._node("integer", token.span, value=token.value)
@@ -188,7 +193,7 @@ class Parser:
             if comment is not None:
                 return comment
 
-        raise self.lithium.res.errors.LithiumSyntaxError(f"Expected value, got {token.type}", token.span)
+        self.eh.throwWithSpan("illegalSyntax", f"expected value, got {token.type}", token.span)
 
     def _parse_group(self) -> dict[str, any]:
         open_token = self._consume("LPAREN", "Expected '('")
@@ -289,7 +294,7 @@ class Parser:
         key_token = self._advance()
         self._consume("DOUBLE_COLON", "Expected '::' after map key")
         if self._at_stop(stop) or not self._starts_value():
-            raise self.lithium.res.errors.LithiumSyntaxError("Expected value after '::'", self._peek().span)
+            self.eh.throwWithSpan("illegalSyntax", "expected value after '::'", self._peek().span)
         value = self.parse_expression(stop=stop, allow_implicit_call=True)
         self._add_map_item(result, str(key_token.value), value)
 
@@ -437,7 +442,7 @@ class Parser:
     def _consume(self, token_type: str, message: str) -> Token:
         if self._check(token_type):
             return self._advance()
-        raise self.lithium.res.errors.LithiumSyntaxError(message, self._peek().span)
+        self.eh.throwWithSpan("illegalSyntax", message, self._peek().span)
 
     def _advance(self) -> Token:
         token = self._peek()
