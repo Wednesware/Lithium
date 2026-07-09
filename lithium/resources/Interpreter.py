@@ -7,6 +7,7 @@ class Interpreter:
         self.current_ast: dict | any | None = None
         self.ast_history: list[dict] = []
         self.eh = self.lithium.res.ErrorHandler(self)
+        self.stringifier = self.lithium.res.Stringifier(self)
         self.scopes: list = [
             self.lithium.res.Scope(self, "global",
                 self.lithium.res.Builtins.getASTOf(self, "print")  
@@ -25,9 +26,10 @@ class Interpreter:
             print(f"now interpreting: {self.current_ast['type']} at {self.current_ast['span']}")
         self.ast_history.append(self.current_ast)
         try:
-            result: dict | None = getattr(self, f"interpret{self.current_ast['type'].capitalize()}")()
+            interpret_function: callable = getattr(self, f"interpret{self.current_ast['type'].capitalize()}")
         except AttributeError:
-            self.eh.throw("faultyInterpreter", f"interpreter does not recognize ast token {self.current_ast['type']!r}")
+            self.eh.throw("outdatedInterpreter", f"interpreter does not recognize ast token {self.current_ast['type']!r}.\nperhaps your interpreter is outdated?")
+        result: dict | None = interpret_function()
         if isinstance(result, dict) and result.get("map"):
             for k, v in result["map"].items():
                 self.current_ast = v
@@ -49,7 +51,7 @@ class Interpreter:
         args: dict = self.interpret()
         if target["map"].get("call") and (target["map"]["call"]["type"] == "data"):
             provided_arguments: int = len(call["args"]["map"])
-            expected_arguments: int = target["map"]["call"]["source"].__code__.co_argcount - 1
+            expected_arguments: int = target["map"]["call"]["source"].__code__.co_argcount - 2
             required_arguments: int = sum(
                 p.default is inspect.Parameter.empty
                 for p in inspect.signature(target["map"]["call"]["source"]).parameters.values()
@@ -58,7 +60,7 @@ class Interpreter:
                 self.eh.throw("tooManyArguments", f"too many arguments provided to {target['name']}. ({provided_arguments} > {expected_arguments})")
             if provided_arguments < expected_arguments:
                 self.eh.throw("tooFewArguments", f"too few arguments provided to {target['name']}. ({provided_arguments} < {expected_arguments})")
-            return target["map"]["call"]["source"](target, **args)
+            return target["map"]["call"]["source"](self, target, **args["map"])
         else:
             self.eh.throw("callError", f"'{target['name']}' is not callable.")
     def interpretIdentifier(self) -> dict:
@@ -66,7 +68,7 @@ class Interpreter:
     def interpretMap(self) -> dict:
         map: dict = self.current_ast
         result: dict = {}
-        for k, v in self.current_ast["map"].items():
+        for k, v in map["map"].items():
             self.current_ast = v
             result[k] = self.interpret()
         map["map"] = result
@@ -79,10 +81,11 @@ class Interpreter:
         return self.current_ast
     def interpretArray(self) -> dict:
         array: dict = self.current_ast
-        result: dict = {}
+        result: list = []
         for item in self.current_ast["items"]:
             self.current_ast = item
             result.append(self.interpret())
-        return result
+        array["items"] = result
+        return array
     def interpretData(self) -> dict:
         return self.current_ast

@@ -15,5 +15,5 @@ class Builtins:
             }
         }
     @staticmethod
-    def print(target, value) -> None:
-        print(value["value"])
+    def print(interpreter, target, value) -> None:
+        print(interpreter.stringifier.stringify(value))
