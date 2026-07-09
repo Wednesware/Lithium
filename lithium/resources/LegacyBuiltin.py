@@ -1,4 +1,4 @@
-class Builtin:
+class LegacyBuiltin:
     def __init__(
         self,
         handler: callable,

@@ -13,15 +13,15 @@ def runpk(lithium) -> None:
         raise SystemExit("File not found.")
 
     with open(lithium.file_path) as file:
-        content: str = file.read()
+        lithium.source = file.read()
 
-    parser = lithium.res.Parser(lithium, content)
-    ast = parser.parse()
+    parser = lithium.res.Parser(lithium, lithium.source)
+    lithium.full_ast = parser.parse()
 
     if "--ast" in argv:
         from json import dumps
-        print(dumps(ast, indent="| "))
+        print(dumps(lithium.full_ast, indent="| "))
         return
 
-    interpreter = lithium.res.Interpreter(lithium, ast)
-    interpreter.run_code()
+    interpreter = lithium.res.Interpreter(lithium)
+    interpreter.runCode()

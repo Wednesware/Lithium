@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-class Builtins:
+class LegacyBuiltins:
     @staticmethod
     def return_(interpreter, node, args, scope):
         value = args.get("value")

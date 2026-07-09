@@ -278,7 +278,7 @@ class Parser:
             value = self.parse_expression(stop=stop | {"ARROW"}, allow_implicit_call=True)
             self._add_positional(result, value)
 
-        if result["value"] is None and not result["kwargs"] and not result.get("comments"):
+        if not result["map"] and not result.get("comments"):
             result["span"] = start.span
         else:
             last = self._previous()
@@ -346,8 +346,7 @@ class Parser:
     def _new_map(self, span: dict[str, int]) -> dict[str, any]:
         result: dict[str, any] = {
             "type": "map",
-            "value": None,
-            "kwargs": {},
+            "map": {},
             "span": dict(span),
         }
         if self.preserve_comments:
@@ -355,16 +354,17 @@ class Parser:
         return result
 
     def _add_positional(self, result: dict[str, any], value: dict[str, any]) -> None:
-        if result["value"] is None:
-            result["value"] = value
-        elif result["value"]["type"] == "array":
-            result["value"]["items"].append(value)
-            result["value"]["span"] = self._merge_spans(result["value"]["span"], value["span"])
+        print(result)
+        if "value" not in result["map"]:
+            result["map"]["value"] = value
+        elif result["map"]["value"]["type"] == "array":
+            result["map"]["value"]["items"].append(value)
+            result["map"]["value"]["span"] = self._merge_spans(result["value"]["span"], value["span"])
         else:
-            result["value"] = self._node(
+            result["map"]["value"] = self._node(
                 "array",
-                self._merge_spans(result["value"]["span"], value["span"]),
-                items=[result["value"], value],
+                self._merge_spans(result["map"]["value"]["span"], value["span"]),
+                items=[result["map"]["value"], value],
             )
         result["span"] = self._merge_spans(result["span"], value["span"])
 
@@ -454,7 +454,7 @@ class Parser:
         return self._tokens[max(0, self.index - 1)]
 
     def _node(self, node_type: str, span: dict[str, int], **fields: any) -> dict[str, any]:
-        return {"type": node_type, **fields, "span": dict(span)}
+        return {"type": node_type, **fields, "map": {}, "span": dict(span)}
 
     def _span_between(
         self,
