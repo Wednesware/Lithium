@@ -14,7 +14,7 @@ class ErrorHandler:
         )
         print(f"* {Color.tomato}{os.path.basename(self.interpreter.lithium.file_path)}: {name} at line {self.interpreter.current_ast['span']['line']}, col {self.interpreter.current_ast['span']['line']}{Color.reset}")
         print(":")
-        print(f"* {Color.tomato}{message}")
+        print(f"* {Color.tomato}{message}{Color.reset}")
         print()
         print(f"    {parts[0]}{Color.tomato}{parts[1]}{Color.reset}{parts[2]}")
         print(f"    {Color.gray}{' ' * len(parts[0])}{Color.reset}{Color.tomato}{'~' * len(parts[1])}{Color.reset}{Color.gray}{'-' * len(parts[2])}{Color.reset}")

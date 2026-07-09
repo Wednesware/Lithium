@@ -291,7 +291,7 @@ class Parser:
         if self._at_stop(stop) or not self._starts_value():
             raise self.lithium.res.errors.LithiumSyntaxError("Expected value after '::'", self._peek().span)
         value = self.parse_expression(stop=stop, allow_implicit_call=True)
-        self._add_kwarg(result, str(key_token.value), value)
+        self._add_map_item(result, str(key_token.value), value)
 
     def _parse_arrow_block(self) -> dict[str, any]:
         arrow = self._consume("ARROW", "Expected '->'")
@@ -368,18 +368,18 @@ class Parser:
             )
         result["span"] = self._merge_spans(result["span"], value["span"])
 
-    def _add_kwarg(self, result: dict[str, any], key: str, value: dict[str, any]) -> None:
-        kwargs = result["kwargs"]
-        if key not in kwargs:
-            kwargs[key] = value
-        elif kwargs[key]["type"] == "array":
-            kwargs[key]["items"].append(value)
-            kwargs[key]["span"] = self._merge_spans(kwargs[key]["span"], value["span"])
+    def _add_map_item(self, result: dict[str, any], key: str, value: dict[str, any]) -> None:
+        map = result["map"]
+        if key not in map:
+            map[key] = value
+        elif map[key]["type"] == "array":
+            map[key]["items"].append(value)
+            map[key]["span"] = self._merge_spans(map[key]["span"], value["span"])
         else:
-            kwargs[key] = self._node(
+            map[key] = self._node(
                 "array",
-                self._merge_spans(kwargs[key]["span"], value["span"]),
-                items=[kwargs[key], value],
+                self._merge_spans(map[key]["span"], value["span"]),
+                items=[map[key], value],
             )
         result["span"] = self._merge_spans(result["span"], value["span"])
 

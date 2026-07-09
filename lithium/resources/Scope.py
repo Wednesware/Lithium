@@ -1,8 +1,8 @@
 class Scope:
-    def __init__(self, interpreter, name: str) -> None:
+    def __init__(self, interpreter, name: str, builtins: dict[str, dict]) -> None:
         self.interpreter = interpreter
         self.name: str = name
-        self.vars: dict[str, dict] = {}
+        self.vars: dict[str, dict] = builtins
     def get(self, ident: str) -> dict:
         try:
             return self.vars[ident]

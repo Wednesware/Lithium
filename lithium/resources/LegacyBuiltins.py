@@ -33,7 +33,7 @@ class LegacyBuiltins:
                 node,
             )
 
-        kwargs = args.get("kwargs", {})
+        map = args.get("kwargs", {})
 
         return value(
             **kwargs
