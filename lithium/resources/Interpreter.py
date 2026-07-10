@@ -24,9 +24,9 @@ class Interpreter:
                 return scope.get(ident)
         self.eh.throw("scopeError", f"identifier '{ident}' is not associated with a value in any scope.")
     def interpret(self) -> dict | None:
+        self.ast_history.append(self.current_ast)
         if self.lithium.getsetting("verbose"):
             print(f"now interpreting: {self.current_ast['type']} at {self.current_ast['span']}")
-        self.ast_history.append(self.current_ast)
         try:
             interpret_function: callable = getattr(self, f"interpret{self.current_ast['type'].capitalize()}")
         except AttributeError:
@@ -35,7 +35,6 @@ class Interpreter:
         if isinstance(result, dict) and result.get("map"):
             for k, v in result["map"].items():
                 self.current_ast = v
-                print(v)
                 result["map"][k] = self.interpret()
         self.ast_history.pop()
         return result
@@ -69,9 +68,9 @@ class Interpreter:
                 if v["type"] not in exp_types and "any" not in exp_types:
                     self.eh.throw("typeError", f"parameter '{k}' expects one of these types: [{' '.join(exp_types)}], not {v['type']}.")
             if provided_arguments > expected_arguments:
-                self.eh.throw("tooManyArguments", f"too many arguments provided to {target['name']}. ({provided_arguments} > {expected_arguments})")
+                self.eh.throw("tooManyArguments", f"too many arguments provided to {target['fnname']}. ({provided_arguments} prov. vs max of {expected_arguments} expected)")
             if provided_arguments < required_arguments:
-                self.eh.throw("tooFewArguments", f"too few arguments provided to {target['name']}. ({provided_arguments} < {expected_arguments})")
+                self.eh.throw("tooFewArguments", f"too few arguments provided to {target['fnname']}. ({provided_arguments} prov. vs min of {required_arguments} required)")
             return target["map"]["call"]["source"](self, target, **args["map"])
         else:
             self.eh.throw("notCallable", f"object of type '{target['type']}' is not callable.")
@@ -91,11 +90,20 @@ class Interpreter:
             self.current_ast = v
             result[k] = self.interpret()
         map["map"] = result
+        if len(self.ast_history) == 3:
+            if "value" in map["map"]:
+                if len(map["map"]) > 1:
+                    pass # TODO
         return map
     def interpretString(self) -> dict:
         return self.current_ast
     def interpretInteger(self) -> dict:
-        self.current_ast["map"]["call"] = self.lithium.res.Builtins.getASTOf(self, "integerCall")
+        self.current_ast["fnname"] = "integerCall"
+        self.current_ast["map"]["call"] = {
+            "type": "data",
+            "source": self.lithium.res.Builtins.integerCall,
+            "span": self.current_ast["span"]
+        }
         return self.current_ast
     def interpretFloat(self) -> dict:
         return self.current_ast

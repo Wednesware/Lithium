@@ -15,7 +15,7 @@ class Builtins:
             }
         }
     @staticmethod
-    def integerCall(interpreter, target, value: "array") -> None: # type: ignore
+    def integerCall(interpreter, target, value: "integer|float") -> None: # type: ignore
         print(value["items"])
     @staticmethod
     def print(interpreter, target, value: "any", to: "identifier" = None) -> None: # type: ignore
