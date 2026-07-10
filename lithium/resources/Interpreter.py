@@ -10,6 +10,7 @@ class Interpreter:
         self.ast_history: list[dict] = []
         self.eh = self.lithium.res.ErrorHandler(self)
         self.stringifier = self.lithium.res.Stringifier(self)
+        self.outputs: list = []
         self.scopes: list = [
             self.lithium.res.Scope(self, "global",
                 self.lithium.res.Builtins.getASTOf(self, "print")  
@@ -30,7 +31,7 @@ class Interpreter:
         try:
             interpret_function: callable = getattr(self, f"interpret{self.current_ast['type'].capitalize()}")
         except AttributeError:
-            self.eh.throw("outdatedInterpreter", f"interpreter does not recognize ast token {self.current_ast['type']!r}.\nperhaps your interpreter is outdated?")
+            self.eh.throw("invalidToken", f"interpreter does not recognize ast token {self.current_ast['type']!r}")
         result: dict | None = interpret_function()
         if isinstance(result, dict) and result.get("map"):
             for k, v in result["map"].items():
@@ -93,7 +94,9 @@ class Interpreter:
         if len(self.ast_history) == 3:
             if "value" in map["map"]:
                 if len(map["map"]) > 1:
-                    pass # TODO
+                    self.eh.throw("illegalLineMap", "you can't define and inject on the same line.")
+                if map["map"]["value"].get("type") == "string":
+                    self.outputs
         return map
     def interpretString(self) -> dict:
         return self.current_ast
@@ -115,5 +118,13 @@ class Interpreter:
             result.append(self.interpret())
         array["items"] = result
         return array
+    def interpretGroup(self) -> dict:
+        group: dict = self.current_ast
+        if group.get("value") is None:
+            return group
+        self.current_ast = group["value"]
+        evaluated = self.interpret()
+        group["value"] = evaluated
+        return group
     def interpretData(self) -> dict:
         return self.current_ast

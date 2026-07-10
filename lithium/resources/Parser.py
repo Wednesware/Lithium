@@ -43,7 +43,7 @@ class Parser:
             self._log("Parsed AST")
             return self.last_ast
         except Exception as err:
-            self.eh.throwNoTraceback("illegalSyntax", str(err))
+            self.eh.throwNoTraceback("internalError", str(err))
 
     def tokens(self) -> list[Token]:
         if not self._tokens or self.content:
@@ -142,7 +142,7 @@ class Parser:
             )
             if self._at_stop(stop) or not self._starts_value():
                 self.eh.throwWithSpan(
-                    "illegalSyntax",
+                    "noValueAfterOperator",
                     f"expected value after operator {operator_token.text!r}",
                     operator_token.span,
                 )
@@ -172,7 +172,7 @@ class Parser:
         token = self._peek()
 
         if token.type in stop:
-            self.eh.throwWithSpan("illegalSyntax", "expected value", token.span)
+            self.eh.throwWithSpan("expectedValue", "expected value", token.span)
 
         if self._match("INTEGER"):
             return self._node("integer", token.span, value=token.value)
@@ -193,21 +193,49 @@ class Parser:
             if comment is not None:
                 return comment
 
-        self.eh.throwWithSpan("illegalSyntax", f"expected value, got {token.type}", token.span)
+        self.eh.throwWithSpan("expectedValue", f"expected value, got {token.type}", token.span)
 
     def _parse_group(self) -> dict[str, any]:
         open_token = self._consume("LPAREN", "Expected '('")
+        # Allow multiple values inside parentheses (like arrays) instead of
+        # requiring the right parenthesis immediately after the first value.
         self._consume_inline_separators()
         if self._check("RPAREN"):
             close_token = self._advance()
             return self._node("group", self._span_between(open_token, close_token), value=None)
-        value = self.parse_expression(
-            stop={"RPAREN", "EOF"},
-            allow_implicit_call=True,
-        )
-        self._consume_inline_separators()
+
+        items: list[dict[str, any]] = []
+
+        while not self._check("RPAREN", "EOF"):
+            if self._match("NEWLINE", "SEMICOLON"):
+                # allow separators between items
+                continue
+            if self._check("COMMENT"):
+                comment = self._comment()
+                if comment is not None:
+                    items.append(comment)
+                continue
+
+            # parse an expression up to a closing paren or EOF
+            value = self.parse_expression(
+                stop={"RPAREN", "EOF"},
+                allow_implicit_call=True,
+            )
+            items.append(value)
+
+            # consume any inline separators after the item
+            self._consume_inline_separators()
+
         close_token = self._consume("RPAREN", "Expected ')' after group")
-        return self._node("group", self._span_between(open_token, close_token), value=value)
+
+        # If there is exactly one item, keep the original semantics: group.value = item
+        if len(items) == 1:
+            return self._node("group", self._span_between(open_token, close_token), value=items[0])
+
+        # Multiple items -> represent as an array inside the group
+        span = self._span_between(open_token, close_token)
+        array_node = self._node("array", span, items=items)
+        return self._node("group", span, value=array_node)
 
     def _parse_array(self) -> dict[str, any]:
         open_token = self._consume("LBRACKET", "Expected '['")
@@ -294,7 +322,7 @@ class Parser:
         key_token = self._advance()
         self._consume("DOUBLE_COLON", "Expected '::' after map key")
         if self._at_stop(stop) or not self._starts_value():
-            self.eh.throwWithSpan("illegalSyntax", "expected value after '::'", self._peek().span)
+            self.eh.throwWithSpan("expectedValue", "expected value after '::'", self._peek().span)
         value = self.parse_expression(stop=stop, allow_implicit_call=True)
         self._add_map_item(result, str(key_token.value), value)
 

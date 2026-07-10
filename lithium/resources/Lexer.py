@@ -76,7 +76,7 @@ class Lexer:
                 continue
 
             span = self._current_span()
-            self.eh.throwWithSpan("illegalSyntax", f"unexpected character {char!r}", span)
+            self.eh.throwWithSpan("unexpectedCharacter", f"unexpected character {char!r}", span)
 
         tokens.append(
             self.lithium.res.Token(
@@ -186,7 +186,7 @@ class Lexer:
 
         if self._at_end():
             self.eh.throwWithSpan(
-                "illegalSyntax",
+                "unterminatedBlockComment",
                 "unterminated block comment",
                 {
                     "start": start,
