@@ -8,3 +8,5 @@ class Scope:
             return self.vars[ident]
         except KeyError:
             self.interpreter.eh.throw("scopeError", f"identifier '{ident}' is not associated with a value in the '{self.name}' scope.")
+    def set(self, ident: str, value: dict) -> None:
+        self.vars[ident] = value

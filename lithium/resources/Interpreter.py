@@ -10,7 +10,7 @@ class Interpreter:
         self.ast_history: list[dict] = []
         self.eh = self.lithium.res.ErrorHandler(self)
         self.stringifier = self.lithium.res.Stringifier(self)
-        self.outputs: list = []
+        self.outputs: list[str] = ["terminal"]
         self.scopes: list = [
             self.lithium.res.Scope(self, "global",
                 self.lithium.res.Builtins.getASTOf(self, "print")  
@@ -94,9 +94,14 @@ class Interpreter:
         if len(self.ast_history) == 3:
             if "value" in map["map"]:
                 if len(map["map"]) > 1:
-                    self.eh.throw("illegalLineMap", "you can't define and inject on the same line.")
+                    self.eh.throw("illegalSyntax", "this syntax is not valid.")
                 if map["map"]["value"].get("type") == "string":
-                    self.outputs
+                    for output in self.outputs:
+                        if output == "terminal":
+                            print(map["map"]["value"]["value"])
+            elif map["map"]:
+                for k, v in map["map"].items():
+                    self.scopes[-1].set(k, v)
         return map
     def interpretString(self) -> dict:
         return self.current_ast
@@ -125,6 +130,6 @@ class Interpreter:
         self.current_ast = group["value"]
         evaluated = self.interpret()
         group["value"] = evaluated
-        return group
+        return evaluated
     def interpretData(self) -> dict:
         return self.current_ast
