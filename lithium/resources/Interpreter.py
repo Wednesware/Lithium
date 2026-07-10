@@ -1,10 +1,12 @@
-import base64, inspect
+import inspect
 
 
 class Interpreter:
     def __init__(self, lithium) -> None:
         self.lithium = lithium
-        self.current_ast: dict | any | None = None
+        self.current_ast: dict | None = None
+        self.current_call: dict | None = None
+        self.current_call_target: dict | None = None
         self.ast_history: list[dict] = []
         self.eh = self.lithium.res.ErrorHandler(self)
         self.stringifier = self.lithium.res.Stringifier(self)
@@ -33,6 +35,7 @@ class Interpreter:
         if isinstance(result, dict) and result.get("map"):
             for k, v in result["map"].items():
                 self.current_ast = v
+                print(v)
                 result["map"][k] = self.interpret()
         self.ast_history.pop()
         return result
@@ -45,30 +48,46 @@ class Interpreter:
         self.interpret()
     def interpretCall(self) -> dict:
         call = self.current_ast
+        self.current_call = call
         self.current_ast = self.current_ast["target"]
         target = self.interpret()
+        self.current_call_target = target
         self.current_ast = call["args"]
         args: dict = self.interpret()
+        self.current_call = None
+        self.current_call_target = None
         if target["map"].get("call") and (target["map"]["call"]["type"] == "data"):
             provided_arguments: int = len(call["args"]["map"])
             expected_arguments: int = target["map"]["call"]["source"].__code__.co_argcount - 2
             required_arguments: int = sum(
                 p.default is inspect.Parameter.empty
                 for p in inspect.signature(target["map"]["call"]["source"]).parameters.values()
-            )
+            ) - 2
+            for k, v in args["map"].items():
+                self.current_ast = v
+                exp_types: list[str] = [t.strip() for t in inspect.signature(target["map"]["call"]["source"]).parameters[k].annotation.split("|")]
+                if v["type"] not in exp_types and "any" not in exp_types:
+                    self.eh.throw("typeError", f"parameter '{k}' expects one of these types: [{' '.join(exp_types)}], not {v['type']}.")
             if provided_arguments > expected_arguments:
                 self.eh.throw("tooManyArguments", f"too many arguments provided to {target['name']}. ({provided_arguments} > {expected_arguments})")
-            if provided_arguments < expected_arguments:
+            if provided_arguments < required_arguments:
                 self.eh.throw("tooFewArguments", f"too few arguments provided to {target['name']}. ({provided_arguments} < {expected_arguments})")
             return target["map"]["call"]["source"](self, target, **args["map"])
         else:
-            self.eh.throw("callError", f"'{target['name']}' is not callable.")
+            self.eh.throw("notCallable", f"object of type '{target['type']}' is not callable.")
     def interpretIdentifier(self) -> dict:
+        try:
+            if self.current_call_target and inspect.signature(self.current_call_target["map"]["call"]["source"]).parameters[self.current_call["current_interp_arg"]].annotation == "identifier":
+                return self.current_ast
+        except KeyError:
+            self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
         return self.findVariable(self.current_ast["value"])
     def interpretMap(self) -> dict:
         map: dict = self.current_ast
         result: dict = {}
         for k, v in map["map"].items():
+            if self.current_call:
+                self.current_call["current_interp_arg"] = k
             self.current_ast = v
             result[k] = self.interpret()
         map["map"] = result
@@ -76,6 +95,7 @@ class Interpreter:
     def interpretString(self) -> dict:
         return self.current_ast
     def interpretInteger(self) -> dict:
+        self.current_ast["map"]["call"] = self.lithium.res.Builtins.getASTOf(self, "integerCall")
         return self.current_ast
     def interpretFloat(self) -> dict:
         return self.current_ast

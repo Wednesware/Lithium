@@ -1,1 +1,2 @@
-print {1 hello::3 world::5}
+age::10+3
+print age

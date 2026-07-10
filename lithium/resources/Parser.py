@@ -346,6 +346,7 @@ class Parser:
             self._span_from_node_list(target, span_end),
             target=target,
             args=args,
+            current_interp_arg=None
         )
 
     def _new_map(self, span: dict[str, int]) -> dict[str, any]:
