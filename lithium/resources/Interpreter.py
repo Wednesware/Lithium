@@ -35,8 +35,9 @@ class Interpreter:
         result: dict | None = interpret_function()
         if isinstance(result, dict) and result.get("map"):
             for k, v in result["map"].items():
-                self.current_ast = v
-                result["map"][k] = self.interpret()
+                if isinstance(v, dict) and v.get("type"):
+                    self.current_ast = v
+                    result["map"][k] = self.interpret()
         self.ast_history.pop()
         return result
     def interpretScript(self) -> None:
@@ -64,6 +65,8 @@ class Interpreter:
                 for p in inspect.signature(target["map"]["call"]["source"]).parameters.values()
             ) - 2
             for k, v in args["map"].items():
+                if v is None:
+                    continue
                 self.current_ast = v
                 exp_types: list[str] = [t.strip() for t in inspect.signature(target["map"]["call"]["source"]).parameters[k].annotation.split("|")]
                 if v["type"] not in exp_types and "any" not in exp_types:

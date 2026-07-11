@@ -1,8 +1,14 @@
+from ww.mg.color import Color
+
+
 class Stringifier:
     def __init__(self, interpreter) -> None:
         self.interpreter = interpreter
         self.eh = self.interpreter.lithium.res.ErrorHandler(self.interpreter)
     def stringify(self, ast: dict) -> str:
+        if not isinstance(ast, dict):
+            self.eh.throw("cannotStringify", "passed invalid ast to stringifier. returning simple string conversion with stringifying.", warning=True)
+            return str(ast)
         if self.interpreter.lithium.getsetting("verbose"):
             print(f"now stringifying: {ast['type']} at {ast['span']}")
         try:
