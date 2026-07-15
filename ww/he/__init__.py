@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import os
+import os, sys
 import importlib, importlib.util
-from ww.mg.config import ObjectNotation # type: ignore
+
+from ww.mg.config import ObjectNotation, ObjectNotationError # type: ignore
 from ww.mg.filepath import FilePath
+
 
 class Handler:
     NAME: str = ""
@@ -48,5 +50,39 @@ class Project:
         self.script: ScriptHandler = ScriptHandler(self)
         self.res: ResourceHandler = ResourceHandler(self)
         self.metadata: dict[str, any] = {}
-    def getsetting(self, name: str) -> str:
-        return ObjectNotation(FilePath(self.path) / "settings.pyon").get(name)
+    def getsetting(self, name: str, else_value: any = "<raiseerror>", scope: str = "prefer args", arg_names: list[str] | None = None) -> any:
+        arg_names = [arg_name.format(name=name, n=name[0]) for arg_name in arg_names or ["--{name}", "-{n}"]]
+        args_scope_value: str = "<notfound>"
+        for i, arg in enumerate(sys.argv[1:], start=1):
+            if arg in arg_names:
+                try:
+                    args_scope_value = sys.argv[i + 1]
+                except IndexError:
+                    pass
+                break
+        settings_path: FilePath = FilePath(self.path) / "settings.pyon"
+        if not settings_path.exists():
+            settings_path.write("{}")
+        settings_on: ObjectNotation = ObjectNotation(settings_path)
+        settings_scope_value: any = settings_on.get(name, "<notfound>")
+        match scope:
+            case "only args":
+                return_value: any = args_scope_value
+            case "only settings":
+                return_value: any = settings_scope_value
+            case "prefer args":
+                return_value: any = settings_scope_value if args_scope_value == "<notfound>" else args_scope_value
+            case "prefer settings":
+                return_value: any = args_scope_value if settings_scope_value == "<notfound>" else settings_scope_value
+            case "return both":
+                return {
+                    "args": args_scope_value,
+                    "settings": settings_scope_value
+                }
+            case "return none":
+                return None
+        if return_value == "<notfound>":
+            if else_value == "<raiseerror>":
+                raise ValueError(f"setting '{name}' was not provided.")
+            return else_value
+        return return_value
