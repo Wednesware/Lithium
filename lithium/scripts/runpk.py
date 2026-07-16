@@ -22,7 +22,7 @@ def runpk(perkeo, path: str | None = None) -> dict:
 
     #if "--ast" in argv:
     #    from json import dumps
-    #    print(dumps(perkeo.full_ast, indent="| "))
+    #    print(dumps(perkeo.full_ast, indent="| ", default=str))
     #    return
 
     interpreter = perkeo.res.Interpreter(perkeo)

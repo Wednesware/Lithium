@@ -28,6 +28,8 @@ class Interpreter:
         self.scopes: list = [
             self.perkeo.res.Scope(self, "global", builtins)
         ]
+    def _isBaseLevel(self) -> bool:
+        return self.ast_history[-2]["type"] == "line"
     def runCode(self) -> None:
         self.current_ast = self.perkeo.full_ast
         self.interpret()
@@ -41,12 +43,14 @@ class Interpreter:
             self.eh.throw("scopeError", f"identifier '{ident}' is not associated with a value in any scope.")
     def interpret(self) -> dict | None:
         self.ast_history.append(self.current_ast)
-        if self.perkeo.getsetting("verbose"):
-            print(f"{os.path.basename(self.perkeo.file_path)}: now interpreting: {self.current_ast['type']} at {self.current_ast.get('span', '(unknown)')}")
         try:
             interpret_function: callable = getattr(self, f"interpret{self.current_ast['type'].capitalize()}")
         except AttributeError:
             self.eh.throw("invalidToken", f"interpreter does not recognize ast token {self.current_ast['type']!r}")
+        if self.perkeo.getsetting("verbose"):
+            print(f"{os.path.basename(self.perkeo.file_path)}: now interpreting: {self.current_ast['type']} at {', '.join(f'{key}={value}' for key, value in self.current_ast.get('span', {}).items()) if 'span' in self.current_ast else '(unknown)'}")
+            print(f"  { {key: value for key, value in self.current_ast.items() if key not in ['span', 'type']} }")
+            print(f"  {interpret_function.__name__}()")
         result: dict | None = interpret_function()
         if isinstance(result, dict) and result.get("map") and result.get("type") != "map":
             for k, v in result["map"].items():
@@ -60,8 +64,28 @@ class Interpreter:
             self.current_ast = body_item
             self.interpret()
     def interpretLine(self) -> None:
-        self.current_ast = self.current_ast["value"]
-        self.interpret()
+        line_value = self.current_ast["value"]
+        self.current_ast = line_value
+        result = self.interpret()
+
+        # A bare identifier on its own line implicitly calls zero-argument functions.
+        if (
+            line_value.get("type") == "identifier"
+            and isinstance(result, dict)
+            and result.get("type") == "function"
+        ):
+            self.current_ast = {
+                "type": "call",
+                "target": line_value,
+                "args": {
+                    "type": "map",
+                    "map": {},
+                    "span": line_value["span"],
+                },
+                "current_interp_arg": None,
+                "span": line_value["span"],
+            }
+            self.interpret()
     def interpretCall(self) -> dict:
         call = self.current_ast
         self.current_call = call
@@ -84,12 +108,14 @@ class Interpreter:
                     continue
                 self.current_ast = v
                 exp_types: list[str] = [t.strip() for t in inspect.signature(target["map"]["call"]["source"]).parameters[k].annotation.split("|")]
+                if ("idarray" in exp_types) and ("array" not in exp_types):
+                    exp_types.append("array")
                 if v["type"] not in exp_types and "any" not in exp_types:
                     self.eh.throw("typeError", f"parameter '{k}' expects one of these types: [{' '.join(exp_types)}], not {v['type']}.")
             if provided_arguments > expected_arguments:
-                self.eh.throw("tooManyArguments", f"too many arguments provided to {target['fnname']}. ({provided_arguments} prov. vs max of {expected_arguments} expected)")
+                self.eh.throw("tooManyArguments", f"too many arguments provided to {target['name']}. ({provided_arguments} prov. vs max of {expected_arguments} expected)")
             if provided_arguments < required_arguments:
-                self.eh.throw("tooFewArguments", f"too few arguments provided to {target['fnname']}. ({provided_arguments} prov. vs min of {required_arguments} required)")
+                self.eh.throw("tooFewArguments", f"too few arguments provided to {target['name']}. ({provided_arguments} prov. vs min of {required_arguments} required)")
             return_value: dict | None = target["map"]["call"]["source"](self, target, **args["map"])
             return {"type": "null", "map": {}, "span": call["span"]} if return_value is None else return_value
         else:
@@ -99,11 +125,12 @@ class Interpreter:
             try:
                 parameter = inspect.signature(self.current_call_target["map"]["call"]["source"]).parameters[self.current_call["current_interp_arg"]]
                 accepted_types = [item.strip() for item in parameter.annotation.split("|")]
-                if "identifier" in accepted_types or "array" in accepted_types:
+                if "identifier" in accepted_types or "idarray" in accepted_types:
                     return self.current_ast
             except KeyError:
                 self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
-        return self.findVariable(self.current_ast["value"])
+        match = self.findVariable(self.current_ast["value"])
+        return match
     def interpretMap(self) -> dict:
         map: dict = self.current_ast
         result: dict = {}
@@ -113,26 +140,23 @@ class Interpreter:
             self.current_ast = v
             result[k] = self.interpret()
         map["map"] = result
-        if len(self.ast_history) == 3:
-            if "value" in map["map"]:
-                if len(map["map"]) > 1:
-                    self.eh.throw("illegalSyntax", "this syntax is not valid.")
-                if map["map"]["value"].get("type") == "string":
-                    for output in self.outputs:
-                        if output == "terminal":
-                            print(map["map"]["value"]["value"])
-                        else:
-                            if os.path.exists(output):
-                                with open(output, "a") as file:
-                                    file.write(f"\n{map['value']['value']}")
-            elif map["map"]:
+        if self._isBaseLevel():
+            if map["map"] and "value" not in map["map"]:
                 for k, v in map["map"].items():
                     self.scopes[-1].set(k, v)
         return map
     def interpretString(self) -> dict:
+        if self._isBaseLevel():
+            for output in self.outputs:
+                if output == "terminal":
+                    print(self.current_ast["value"])
+                else:
+                    if os.path.exists(output):
+                        with open(output, "a") as file:
+                            file.write(f"{self.current_ast['value']}\n")
         return self.current_ast
     def interpretInteger(self) -> dict:
-        self.current_ast["fnname"] = "integerCall"
+        self.current_ast["name"] = "integerCall"
         self.current_ast["map"]["call"] = {
             "type": "data",
             "source": self.perkeo.res.Builtins.integerCall,
@@ -144,7 +168,18 @@ class Interpreter:
     def interpretArray(self) -> dict:
         array: dict = self.current_ast
         result: list = []
+        preserve_identifiers = False
+        if self.current_call_target and self.current_call and self.current_call.get("current_interp_arg") is not None:
+            try:
+                parameter = inspect.signature(self.current_call_target["map"]["call"]["source"]).parameters[self.current_call["current_interp_arg"]]
+                accepted_types = [item.strip() for item in parameter.annotation.split("|")]
+                preserve_identifiers = "idarray" in accepted_types
+            except KeyError:
+                self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
         for item in self.current_ast["items"]:
+            if preserve_identifiers and item.get("type") == "identifier":
+                result.append(item)
+                continue
             self.current_ast = item
             result.append(self.interpret())
         array["items"] = result

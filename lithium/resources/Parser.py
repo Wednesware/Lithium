@@ -388,7 +388,10 @@ class Parser:
         self._consume("DOUBLE_COLON", "Expected '::' after map key")
         if self._at_stop(stop) or not self._starts_value():
             self.eh.throwWithSpan("expectedValue", "expected value after '::'", self._peek().span)
-        value = self.parse_expression(stop=stop, allow_implicit_call=True)
+        # Keep subsequent keyword arguments at this call level.
+        # Parenthesized values can still contain intentional implicit calls.
+        allow_implicit_call = self._check("LPAREN")
+        value = self.parse_expression(stop=stop, allow_implicit_call=allow_implicit_call)
         self._add_map_item(result, str(key_token.value), value)
 
     def _parse_arrow_block(self) -> dict[str, any]:

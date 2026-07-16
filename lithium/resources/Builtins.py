@@ -243,24 +243,40 @@ class Builtins:
     def print(interpreter, target, value: "any" = None, to: "identifier|array" = None, lib: "identifier|array" = None) -> None: # type: ignore
         print(interpreter.stringifier.stringify(value))
     @staticmethod
-    def import_(interpreter, target, value: "identifier") -> dict | None: # type: ignore
-        parts: list[str] = value["value"].split(".")
-        path: str = os.path.join(interpreter.perkeo.path, "lib", *parts[1:-2], parts[-2] + ".py") if parts[0] == "pko" else os.path.join(os.path.dirname(interpreter.perkeo.file_path), *parts[:-2], parts[-2] + ".pk")
-        if not os.path.isfile(path):
-            interpreter.eh.throw("sourceNotFound", f"could not find a source file for \"{'.'.join(parts[:-1])}\"")
-        match path.split(".")[-1]:
-            case "pk":
-                interpreter = interpreter.perkeo.script.runpk(path)["interpreter"]
-                value: dict | None = interpreter.findVariable(parts[-1], scopes=["global"], error=False)
-                if not value:
-                    interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{parts[-1]}\"\nin the global scope from imported source \"{'.'.join(parts[:-1])}\"")
-                interpreter.scopes[-1].set(parts[-1], value[parts[-1]])
-            case "py":
-                spec = importlib.util.spec_from_file_location(parts[-1], path)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                raw_value = getattr(module, f"_pko_{parts[-1]}", None)
-                if raw_value is None:
-                    interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{parts[-1]}\"\nin the global scope from imported source \"{'.'.join(parts[:-1])}\"")
-                value: dict = Builtins.getASTOf(interpreter, parts[-1], source=raw_value)
-                interpreter.scopes[-1].set(parts[-1], value[parts[-1]])
+    def import_(interpreter, target, value: "identifier|array|string" = None, sheet: "identifier|array|string" = None) -> dict | None: # type: ignore
+        if sheet:
+            for single_value in (sheet["items"] if sheet["type"] == "array" else [sheet]):
+                pkis_path: str = os.path.join(os.path.dirname(interpreter.perkeo.file_path), single_value["value"] + ".pkis")
+                if not os.path.isfile(pkis_path):
+                    interpreter.eh.throw("sheetNotFound", f"could not find import sheet file \"{single_value['value']}.pkis\"")
+                with open(pkis_path) as file:
+                    content: str = file.read()
+                for import_id in content.splitlines():
+                    Builtins.import_(interpreter, target, {"type": "identifier", "value": import_id, "map": {}, "span": single_value["span"]})
+        if value:
+            for single_value in (value["items"] if value["type"] == "array" else [value]):
+                parts: list[str] = single_value["value"].split(".")
+                try:
+                    path: str = os.path.join(interpreter.perkeo.path, "resources", "lib", *parts[1:-2], parts[-2] + ".py") if parts[0] == "pko" else os.path.join(os.path.dirname(interpreter.perkeo.file_path), *parts[:-2], parts[-2] + ".pk")
+                except IndexError:
+                    interpreter.eh.throw("incompleteImport", "you must provide a specific variable to import from that source.")
+                if not os.path.isfile(path):
+                    interpreter.eh.throw("sourceNotFound", f"could not find a source file for \"{'.'.join(parts[:-1])}\"")
+                match path.split(".")[-1]:
+                    case "pk":
+                        interpreter = interpreter.perkeo.script.runpk(path)["interpreter"]
+                        result: dict | None = interpreter.findVariable(parts[-1], scopes=["global"], error=False)
+                        if not result:
+                            interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{parts[-1]}\"\nin the global scope from imported source \"{'.'.join(parts[:-1])}\"")
+                        interpreter.scopes[-1].set(parts[-1], result[parts[-1]])
+                    case "py":
+                        spec = importlib.util.spec_from_file_location(parts[-1], path)
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        raw_value = getattr(module, f"_pko_{parts[-1]}", None)
+                        if raw_value is None:
+                            interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{parts[-1]}\"\nin the global scope from imported source \"{'.'.join(parts[:-1])}\"")
+                        result: dict = Builtins.getASTOf(interpreter, parts[-1], source=raw_value)
+                        interpreter.scopes[-1].set(parts[-1], result[parts[-1]])
+        if not value and not sheet:
+            interpreter.eh.throw("tooFewArguments", "'import' expects either library or sheet provided.")
