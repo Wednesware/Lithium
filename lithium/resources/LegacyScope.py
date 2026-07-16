@@ -2,20 +2,20 @@ class Scope:
     def __init__(
         self,
         parent=None,
-        lithium=None,
+        perkeo=None,
     ):
         self.parent = parent
-        self.lithium = lithium or (
-            parent.lithium
+        self.perkeo = perkeo or (
+            parent.perkeo
             if parent else None
         )
         self.values: dict[str, any] = {}
         self.constants: set[str] = set()
 
     def child(self):
-        return self.lithium.res.Scope(
+        return self.perkeo.res.Scope(
             self,
-            self.lithium,
+            self.perkeo,
         )
 
     def define(self, name: str, value: any, constant: bool = False) -> any:

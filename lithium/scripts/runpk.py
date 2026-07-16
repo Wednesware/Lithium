@@ -3,25 +3,32 @@ import os
 from sys import argv
 
 
-def runpk(lithium) -> None:
-    if len(argv) < 2:
-        raise SystemExit("Usage: python -m lithium <file.pk> [--ast]")
+def runpk(perkeo, path: str | None = None) -> dict:
+    if path is None:
+        if len(argv) < 2:
+            raise SystemExit("Usage: pko <file.pk>")
+        path = argv[1]
 
-    lithium.file_path = os.path.abspath(argv[1])
+    perkeo.file_path = os.path.abspath(path)
 
-    if not os.path.exists(lithium.file_path):
+    if not os.path.exists(perkeo.file_path):
         raise SystemExit("File not found.")
 
-    with open(lithium.file_path) as file:
-        lithium.source = file.read()
+    with open(perkeo.file_path) as file:
+        perkeo.source = file.read()
 
-    parser = lithium.res.Parser(lithium, lithium.source)
-    lithium.full_ast = parser.parse()
+    parser = perkeo.res.Parser(perkeo, perkeo.source)
+    perkeo.full_ast = parser.parse()
 
-    if "--ast" in argv:
-        from json import dumps
-        print(dumps(lithium.full_ast, indent="| "))
-        return
+    #if "--ast" in argv:
+    #    from json import dumps
+    #    print(dumps(perkeo.full_ast, indent="| "))
+    #    return
 
-    interpreter = lithium.res.Interpreter(lithium)
+    interpreter = perkeo.res.Interpreter(perkeo)
     interpreter.runCode()
+    return {
+        "perkeo": perkeo,
+        "parser": parser,
+        "interpreter": interpreter,
+    }

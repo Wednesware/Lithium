@@ -11,17 +11,18 @@ class Parser:
         "LPAREN",
         "LBRACE",
         "LBRACKET",
+        "OPERATOR",
     }
 
     LINE_ENDERS = {"NEWLINE", "SEMICOLON", "EOF"}
 
     def __init__(
         self,
-        lithium: any = None,
+        perkeo: any = None,
         content: str | list[Token] = "",
         preserve_comments: bool = True,
     ):
-        self.lithium = lithium
+        self.perkeo = perkeo
         self.content = ""
         self._tokens: list[Token] = []
         if self._is_token_list(content):
@@ -32,7 +33,7 @@ class Parser:
         self.index = 0
         self.last_tokens: list[Token] = self._tokens
         self.last_ast: dict[str, any] | None = None
-        self.eh = self.lithium.res.ErrorHandler(self)
+        self.eh = self.perkeo.res.ErrorHandler(self)
 
     def parse(self) -> dict[str, any]:
         try:
@@ -43,12 +44,13 @@ class Parser:
             self._log("Parsed AST")
             return self.last_ast
         except Exception as err:
-            self.eh.throwNoTraceback("internalError", str(err))
+            self.eh.throwNoTraceback("unknownError", f"{err.__class__.__name__}: {err}", warning=self.perkeo.getsetting("verbose"))
+            raise err
 
     def tokens(self) -> list[Token]:
         if not self._tokens or self.content:
             self._log("Lexing source")
-            self._tokens = self.lithium.res.Lexer(self.lithium, self.content).tokenize()
+            self._tokens = self.perkeo.res.Lexer(self.perkeo, self.content).tokenize()
             self.last_tokens = self._tokens
             self._log(f"Lexed {len(self._tokens)} tokens")
         return self._tokens
@@ -63,11 +65,11 @@ class Parser:
         self.tokens()
 
     def _log(self, message: str) -> None:
-        logger = getattr(self.lithium, "logger", None)
+        logger = getattr(self.perkeo, "logger", None)
         if logger is not None and hasattr(logger, "debug"):
             logger.debug(message)
             return
-        log = getattr(self.lithium, "log", None)
+        log = getattr(self.perkeo, "log", None)
         if callable(log):
             log(message)
 
@@ -112,7 +114,7 @@ class Parser:
         allow_implicit_call: bool = False,
     ) -> dict[str, any]:
         stop = set(stop or ())
-        value = self._parse_operator_call(stop)
+        value = self._parse_comparison(stop)
 
         if (
             allow_implicit_call
@@ -124,47 +126,103 @@ class Parser:
 
         return value
 
-    def _parse_operator_call(self, stop: set[str]) -> dict[str, any]:
-        target = self._parse_postfix(stop)
-        items: list[dict[str, any]] = []
-        first_operator: Token | None = None
+    def _parse_comparison(self, stop: set[str]) -> dict[str, any]:
+        target = self._parse_additive(stop)
 
         while not self._at_stop(stop) and self._check("OPERATOR"):
+            operator_token = self._peek()
+            if operator_token.value not in {"=", "==", "!=", ">", ">=", "<", "<=", "|", "&", ":", "..", "..="}:
+                break
             operator_token = self._advance()
-            first_operator = first_operator or operator_token
-            items.append(
-                self._node(
-                    "operator",
-                    operator_token.span,
-                    value=operator_token.value,
-                    text=operator_token.text,
-                )
-            )
             if self._at_stop(stop) or not self._starts_value():
                 self.eh.throwWithSpan(
                     "noValueAfterOperator",
                     f"expected value after operator {operator_token.text!r}",
                     operator_token.span,
                 )
-            items.append(self._parse_postfix(stop))
 
-        if not items:
-            return target
+            right = self._parse_additive(stop)
+            args_span = self._span_from_node_list(target, right)
+            args = self._new_map(args_span)
+            self._add_positional(args, target)
+            self._add_positional(args, right)
+            target = self._call(
+                self._node("identifier", operator_token.span, value=operator_token.value),
+                args,
+            )
 
-        args_span = self._span_from_node_list(first_operator, items[-1])
-        args = self._new_map(args_span)
-        args["value"] = self._node("array", args_span, items=items)
-        return self._call(target, args)
+        return target
+
+    def _parse_additive(self, stop: set[str]) -> dict[str, any]:
+        target = self._parse_multiplicative(stop)
+
+        while not self._at_stop(stop) and self._check("OPERATOR"):
+            operator_token = self._peek()
+            if operator_token.value not in {"+", "-"}:
+                break
+            operator_token = self._advance()
+            if self._at_stop(stop) or not self._starts_value():
+                self.eh.throwWithSpan(
+                    "noValueAfterOperator",
+                    f"expected value after operator {operator_token.text!r}",
+                    operator_token.span,
+                )
+
+            right = self._parse_multiplicative(stop)
+            args_span = self._span_from_node_list(target, right)
+            args = self._new_map(args_span)
+            self._add_positional(args, target)
+            self._add_positional(args, right)
+            target = self._call(
+                self._node("identifier", operator_token.span, value=operator_token.value),
+                args,
+            )
+
+        return target
+
+    def _parse_multiplicative(self, stop: set[str]) -> dict[str, any]:
+        target = self._parse_postfix(stop)
+
+        while not self._at_stop(stop) and self._check("OPERATOR"):
+            operator_token = self._peek()
+            if operator_token.value not in {"*", "/", "%", "^", "%*"}:
+                break
+            operator_token = self._advance()
+            if self._at_stop(stop) or not self._starts_value():
+                self.eh.throwWithSpan(
+                    "noValueAfterOperator",
+                    f"expected value after operator {operator_token.text!r}",
+                    operator_token.span,
+                )
+
+            right = self._parse_postfix(stop)
+            args_span = self._span_from_node_list(target, right)
+            args = self._new_map(args_span)
+            self._add_positional(args, target)
+            self._add_positional(args, right)
+            target = self._call(
+                self._node("identifier", operator_token.span, value=operator_token.value),
+                args,
+            )
+
+        return target
+
+    def _parse_operator_call(self, stop: set[str]) -> dict[str, any]:
+        return self._parse_additive(stop)
+    
+    #def _parse_operator_call(self, _) -> dict[str, any]:
+    #    token = self._peek()
+    #    return self._node("identifier", token.span, value=token.value)
 
     def _parse_postfix(self, stop: set[str]) -> dict[str, any]:
         value = self._parse_primary(stop)
 
         while not self._at_stop(stop) and self._check("LPAREN"):
-            open_token = self._advance()
-            args = self._parse_argument_map(stop={"RPAREN"})
-            close_token = self._consume("RPAREN", "Expected ')' after call arguments")
-            args["span"] = self._span_between(open_token, close_token)
-            value = self._call(value, args, close_token)
+            group = self._parse_group()
+            args = self._new_map(group["span"])
+            if group["value"] is not None:
+                self._add_positional(args, group["value"])
+            value = self._call(value, args, group)
 
         return value
 
@@ -180,6 +238,9 @@ class Parser:
             return self._node("float", token.span, value=token.value)
         if self._match("STRING"):
             return self._node("string", token.span, value=token.value, text=token.text)
+        if self._check("OPERATOR"):
+            token = self._advance()
+            return self._node("identifier", token.span, value=token.value)
         if self._match("IDENTIFIER"):
             return self._node("identifier", token.span, value=token.value)
         if self._check("LPAREN"):
@@ -197,45 +258,44 @@ class Parser:
 
     def _parse_group(self) -> dict[str, any]:
         open_token = self._consume("LPAREN", "Expected '('")
-        # Allow multiple values inside parentheses (like arrays) instead of
-        # requiring the right parenthesis immediately after the first value.
         self._consume_inline_separators()
         if self._check("RPAREN"):
             close_token = self._advance()
             return self._node("group", self._span_between(open_token, close_token), value=None)
 
-        items: list[dict[str, any]] = []
+        value = self.parse_expression(
+            stop={"RPAREN", "EOF"},
+            allow_implicit_call=True,
+        )
 
-        while not self._check("RPAREN", "EOF"):
-            if self._match("NEWLINE", "SEMICOLON"):
-                # allow separators between items
-                continue
-            if self._check("COMMENT"):
-                comment = self._comment()
-                if comment is not None:
-                    items.append(comment)
-                continue
+        self._consume_inline_separators()
 
-            # parse an expression up to a closing paren or EOF
-            value = self.parse_expression(
-                stop={"RPAREN", "EOF"},
-                allow_implicit_call=True,
-            )
-            items.append(value)
+        if not self._check("RPAREN", "EOF"):
+            args = self._new_map(value["span"])
+            self._add_positional(args, value)
 
-            # consume any inline separators after the item
-            self._consume_inline_separators()
+            while not self._check("RPAREN", "EOF"):
+                if self._match("NEWLINE", "SEMICOLON"):
+                    continue
+                if self._check("COMMENT"):
+                    comment = self._comment()
+                    if comment is not None:
+                        self._add_comment(args, comment)
+                    continue
+
+                self._add_positional(
+                    args,
+                    self.parse_expression(
+                        stop={"RPAREN", "EOF"},
+                        allow_implicit_call=True,
+                    ),
+                )
+
+            close_token = self._consume("RPAREN", "Expected ')' after group")
+            return self._node("group", self._span_between(open_token, close_token), value=self._call(value, args, close_token))
 
         close_token = self._consume("RPAREN", "Expected ')' after group")
-
-        # If there is exactly one item, keep the original semantics: group.value = item
-        if len(items) == 1:
-            return self._node("group", self._span_between(open_token, close_token), value=items[0])
-
-        # Multiple items -> represent as an array inside the group
-        span = self._span_between(open_token, close_token)
-        array_node = self._node("array", span, items=items)
-        return self._node("group", span, value=array_node)
+        return self._node("group", self._span_between(open_token, close_token), value=value)
 
     def _parse_array(self) -> dict[str, any]:
         open_token = self._consume("LBRACKET", "Expected '['")
@@ -252,7 +312,7 @@ class Parser:
             items.append(
                 self.parse_expression(
                     stop={"NEWLINE", "SEMICOLON", "RBRACKET", "EOF"},
-                    allow_implicit_call=True,
+                    allow_implicit_call=False,
                 )
             )
 
@@ -308,7 +368,12 @@ class Parser:
             if not self._starts_value():
                 break
 
-            value = self.parse_expression(stop=stop | {"ARROW"}, allow_implicit_call=True)
+            # Keep keyword arguments attached to the current call instead of
+            # being absorbed into an implicit nested call.
+            # Parenthesized arguments are explicitly grouped, so they may still
+            # contain an implicit call like `(stringify 5..=4)`.
+            allow_implicit_call = self._check("LPAREN")
+            value = self.parse_expression(stop=stop | {"ARROW"}, allow_implicit_call=allow_implicit_call)
             self._add_positional(result, value)
 
         if not result["map"] and not result.get("comments"):
@@ -381,6 +446,7 @@ class Parser:
         result: dict[str, any] = {
             "type": "map",
             "map": {},
+            "truthiness": lambda map: bool(map["map"]),
             "span": dict(span),
         }
         if self.preserve_comments:
@@ -390,15 +456,16 @@ class Parser:
     def _add_positional(self, result: dict[str, any], value: dict[str, any]) -> None:
         if "value" not in result["map"]:
             result["map"]["value"] = value
-        elif result["map"]["value"]["type"] == "array":
+        elif result["map"]["value"]["type"] == "array" and result["map"]["value"].get("is_argument_pack"):
             result["map"]["value"]["items"].append(value)
-            result["map"]["value"]["span"] = self._merge_spans(result["value"]["span"], value["span"])
+            result["map"]["value"]["span"] = self._merge_spans(result["map"]["value"]["span"], value["span"])
         else:
             result["map"]["value"] = self._node(
                 "array",
                 self._merge_spans(result["map"]["value"]["span"], value["span"]),
                 items=[result["map"]["value"], value],
             )
+            result["map"]["value"]["is_argument_pack"] = True
         result["span"] = self._merge_spans(result["span"], value["span"])
 
     def _add_map_item(self, result: dict[str, any], key: str, value: dict[str, any]) -> None:
@@ -435,7 +502,7 @@ class Parser:
         )
 
     def _looks_like_kwarg(self) -> bool:
-        return self._peek().type in {"IDENTIFIER", "STRING", "INTEGER", "FLOAT"} and self._peek(1).type == "DOUBLE_COLON"
+        return self._peek().type in {"IDENTIFIER", "STRING", "INTEGER", "FLOAT", "OPERATOR"} and self._peek(1).type == "DOUBLE_COLON"
 
     def _starts_value(self) -> bool:
         return self._peek().type in self.VALUE_STARTERS or self._check("COMMENT")
@@ -487,7 +554,7 @@ class Parser:
         return self._tokens[max(0, self.index - 1)]
 
     def _node(self, node_type: str, span: dict[str, int], **fields: any) -> dict[str, any]:
-        return {"type": node_type, **fields, "map": {}, "span": dict(span)}
+        return {"type": node_type, **fields, "map": {}, "truthiness": lambda x: bool(x.get("value")), "span": dict(span)}
 
     def _span_between(
         self,
@@ -529,9 +596,9 @@ class Parser:
             "end_column": first["end_column"] if first["end"] >= second["end"] else second["end_column"],
         }
 
-def parse_lithium(
+def parse_perkeo(
     content: str,
     preserve_comments: bool = True,
-    lithium: any = None,
+    perkeo: any = None,
 ) -> dict[str, any]:
-    return Parser(lithium, content, preserve_comments=preserve_comments).parse()
+    return Parser(perkeo, content, preserve_comments=preserve_comments).parse()

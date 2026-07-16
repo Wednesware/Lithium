@@ -9,14 +9,14 @@ type Scope = any
 class LegacyInterpreter:
     def __init__(
             self,
-            lithium,
+            perkeo,
             ast_or_parser: dict[str, any] | any,
             output: callable | None = None
     ):
-        self.lithium = lithium
+        self.perkeo = perkeo
         self.ast_or_parser = ast_or_parser
         self.output = output or print
-        self.global_scope = self.lithium.res.Scope()
+        self.global_scope = self.perkeo.res.Scope()
         self.builtins: dict[str, Builtin] = {}
         self.modules: dict = {}
         self.last_result = None
@@ -25,7 +25,7 @@ class LegacyInterpreter:
     def _resolve_module_path(self, name):
         for path in [
             os.path.abspath(f"{name}.pk"),
-            os.path.join(self.lithium.path, "global", f"{name}.pk")
+            os.path.join(self.perkeo.path, "global", f"{name}.pk")
         ]:
             print(path)
             if os.path.exists(path):
@@ -62,15 +62,15 @@ class LegacyInterpreter:
 
         self.register_builtin(
             "call",
-            self.lithium.res.Builtins.call,
+            self.perkeo.res.Builtins.call,
         )
         self.register_builtin(
             "return",
-            self.lithium.res.Builtins.return_,
+            self.perkeo.res.Builtins.return_,
         )
         self.register_builtin(
             "import",
-            self.lithium.res.Builtins.import_,
+            self.perkeo.res.Builtins.import_,
         )
 
         for symbol, operation in {
@@ -99,7 +99,7 @@ class LegacyInterpreter:
         evaluate_args=True,
         pass_block=False,
     ):
-        info = self.lithium.res.Builtin(
+        info = self.perkeo.res.Builtin(
             handler,
             evaluate_args,
             pass_block,
@@ -124,7 +124,7 @@ class LegacyInterpreter:
 
         try:
             self.last_result = self.execute(ast, self.global_scope)
-        except self.lithium.res.ReturnSignal as signal:
+        except self.perkeo.res.ReturnSignal as signal:
             self.last_result = signal.value
         return self.last_result
 
@@ -157,10 +157,10 @@ class LegacyInterpreter:
                 continue
             try:
                 result = self.execute(child, scope)
-            except self.lithium.res.ReturnSignal as signal:
+            except self.perkeo.res.ReturnSignal as signal:
                 if signal.layers == -1 or signal.layers <= 1:
                     raise
-                raise self.lithium.res.ReturnSignal(signal.value, signal.layers - 1)
+                raise self.perkeo.res.ReturnSignal(signal.value, signal.layers - 1)
         return result
 
     def execute_line(self, node: dict[str, any], scope: Scope) -> any:
@@ -240,7 +240,7 @@ class LegacyInterpreter:
         args = self.prepare_argument_map(
             node.get("args"),
             scope,
-            evaluate=not isinstance(target, self.lithium.res.Builtin) or target.evaluate_args,
+            evaluate=not isinstance(target, self.perkeo.res.Builtin) or target.evaluate_args,
         )
 
         builtin = None
@@ -318,7 +318,7 @@ class LegacyInterpreter:
 
     def error(self, message: str, node: dict[str, any] | None = None) -> Exception:
         span = node.get("span") if isinstance(node, dict) else None
-        error_class = getattr(self.lithium.res.errors, "LithiumRuntimeError", RuntimeError)
+        error_class = getattr(self.perkeo.res.errors, "perkeoRuntimeError", RuntimeError)
         return error_class(message, span)
 
 
@@ -369,7 +369,7 @@ class LegacyInterpreter:
                 raise self.error("Operator is missing a right-hand value", operator_node)
             operator_name = operator_node["value"]
             operator = scope.get(operator_name)
-            if not isinstance(operator, self.lithium.res.Builtin):
+            if not isinstance(operator, self.perkeo.res.Builtin):
                 raise self.error(f"Operator {operator_name!r} is not callable", operator_node)
             right = self.evaluate(right_node, scope)
             left = operator(

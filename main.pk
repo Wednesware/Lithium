@@ -1,1 +1,5 @@
 import pko.io.print
+import pko.io.stringify
+
+
+print "<p>hi</p>" to::index.html

@@ -13,14 +13,14 @@ class Lexer:
 
     OPERATOR_CHARS = set("+-*/%=!<>|&^~?.,:@$")
 
-    def __init__(self, lithium, source: str):
-        self.lithium = lithium
+    def __init__(self, perkeo, source: str):
+        self.perkeo = perkeo
         self.source = source
         self.length = len(source)
         self.index = 0
         self.line = 1
         self.column = 1
-        self.eh = self.lithium.res.ErrorHandler(self)
+        self.eh = self.perkeo.res.ErrorHandler(self)
 
     def __iter__(self) -> iter:
         return iter(self.tokenize())
@@ -79,7 +79,7 @@ class Lexer:
             self.eh.throwWithSpan("unexpectedCharacter", f"unexpected character {char!r}", span)
 
         tokens.append(
-            self.lithium.res.Token(
+            self.perkeo.res.Token(
                 "EOF",
                 None,
                 "",
@@ -132,7 +132,7 @@ class Lexer:
         line: int,
         column: int,
     ) -> Token:
-        return self.lithium.res.Token(
+        return self.perkeo.res.Token(
             token_type,
             value,
             self.source[start:self.index],
@@ -153,7 +153,7 @@ class Lexer:
     def _newline(self) -> Token:
         start, line, column = self._mark()
         self._advance()
-        return self.lithium.res.Token(
+        return self.perkeo.res.Token(
             "NEWLINE",
             "\n",
             self.source[start:self.index],
@@ -268,8 +268,15 @@ class Lexer:
     def _identifier(self) -> Token:
         start, line, column = self._mark()
         self._advance()
-        while self._is_identifier_part(self._peek()):
-            self._advance()
+        while True:
+            next_char = self._peek()
+            if self._is_identifier_part(next_char):
+                self._advance()
+                continue
+            if next_char == "." and self._is_identifier_start(self._peek(1)):
+                self._advance()
+                continue
+            break
         return self._token(
             "IDENTIFIER",
             self.source[start:self.index],

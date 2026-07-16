@@ -1,6 +1,6 @@
 from ww.he import Project
 
 
-lithium: Project = Project(__file__, ".")
+perkeo: Project = Project(__file__, ".")
 
-lithium.script.runpk()
+perkeo.script.runpk()

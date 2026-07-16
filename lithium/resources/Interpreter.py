@@ -1,39 +1,54 @@
-import inspect
+import inspect, os
 
 
 class Interpreter:
-    def __init__(self, lithium) -> None:
-        self.lithium = lithium
+    def __init__(self, perkeo) -> None:
+        self.perkeo = perkeo
         self.current_ast: dict | None = None
         self.current_call: dict | None = None
         self.current_call_target: dict | None = None
         self.ast_history: list[dict] = []
-        self.eh = self.lithium.res.ErrorHandler(self)
-        self.stringifier = self.lithium.res.Stringifier(self)
+        self.eh = self.perkeo.res.ErrorHandler(self)
+        self.stringifier = self.perkeo.res.Stringifier(self)
         self.outputs: list[str] = ["terminal"]
+        self.posts: list[str] = []
+        builtins = self.perkeo.res.Builtins.getASTOf(self, "import", "import_") | {
+            "true": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "on": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "enabled": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "yes": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "false": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "off": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "disabled": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "no": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "null": {"type": "null", "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+        }
+        for operator_name, source_name in self.perkeo.res.Builtins.OPERATOR_BUILTINS.items():
+            builtins.update(self.perkeo.res.Builtins.getASTOf(self, operator_name, source_name))
         self.scopes: list = [
-            self.lithium.res.Scope(self, "global",
-                self.lithium.res.Builtins.getASTOf(self, "print")  
-            )
+            self.perkeo.res.Scope(self, "global", builtins)
         ]
     def runCode(self) -> None:
-        self.current_ast = self.lithium.full_ast
+        self.current_ast = self.perkeo.full_ast
         self.interpret()
-    def findVariable(self, ident: str) -> any:
+    def findVariable(self, ident: str, scopes: list[str] | None = None, error: bool = True) -> any:
         for scope in self.scopes:
+            if scopes is not None and scope.name not in scopes:
+                continue
             if ident in scope.vars:
                 return scope.get(ident)
-        self.eh.throw("scopeError", f"identifier '{ident}' is not associated with a value in any scope.")
+        if error:
+            self.eh.throw("scopeError", f"identifier '{ident}' is not associated with a value in any scope.")
     def interpret(self) -> dict | None:
         self.ast_history.append(self.current_ast)
-        if self.lithium.getsetting("verbose"):
-            print(f"now interpreting: {self.current_ast['type']} at {self.current_ast['span']}")
+        if self.perkeo.getsetting("verbose"):
+            print(f"{os.path.basename(self.perkeo.file_path)}: now interpreting: {self.current_ast['type']} at {self.current_ast.get('span', '(unknown)')}")
         try:
             interpret_function: callable = getattr(self, f"interpret{self.current_ast['type'].capitalize()}")
         except AttributeError:
             self.eh.throw("invalidToken", f"interpreter does not recognize ast token {self.current_ast['type']!r}")
         result: dict | None = interpret_function()
-        if isinstance(result, dict) and result.get("map"):
+        if isinstance(result, dict) and result.get("map") and result.get("type") != "map":
             for k, v in result["map"].items():
                 if isinstance(v, dict) and v.get("type"):
                     self.current_ast = v
@@ -75,15 +90,19 @@ class Interpreter:
                 self.eh.throw("tooManyArguments", f"too many arguments provided to {target['fnname']}. ({provided_arguments} prov. vs max of {expected_arguments} expected)")
             if provided_arguments < required_arguments:
                 self.eh.throw("tooFewArguments", f"too few arguments provided to {target['fnname']}. ({provided_arguments} prov. vs min of {required_arguments} required)")
-            return target["map"]["call"]["source"](self, target, **args["map"])
+            return_value: dict | None = target["map"]["call"]["source"](self, target, **args["map"])
+            return {"type": "null", "map": {}, "span": call["span"]} if return_value is None else return_value
         else:
             self.eh.throw("notCallable", f"object of type '{target['type']}' is not callable.")
     def interpretIdentifier(self) -> dict:
-        try:
-            if self.current_call_target and inspect.signature(self.current_call_target["map"]["call"]["source"]).parameters[self.current_call["current_interp_arg"]].annotation == "identifier":
-                return self.current_ast
-        except KeyError:
-            self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
+        if self.current_call_target and self.current_call and self.current_call.get("current_interp_arg") is not None:
+            try:
+                parameter = inspect.signature(self.current_call_target["map"]["call"]["source"]).parameters[self.current_call["current_interp_arg"]]
+                accepted_types = [item.strip() for item in parameter.annotation.split("|")]
+                if "identifier" in accepted_types or "array" in accepted_types:
+                    return self.current_ast
+            except KeyError:
+                self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
         return self.findVariable(self.current_ast["value"])
     def interpretMap(self) -> dict:
         map: dict = self.current_ast
@@ -102,6 +121,10 @@ class Interpreter:
                     for output in self.outputs:
                         if output == "terminal":
                             print(map["map"]["value"]["value"])
+                        else:
+                            if os.path.exists(output):
+                                with open(output, "a") as file:
+                                    file.write(f"\n{map['value']['value']}")
             elif map["map"]:
                 for k, v in map["map"].items():
                     self.scopes[-1].set(k, v)
@@ -112,7 +135,7 @@ class Interpreter:
         self.current_ast["fnname"] = "integerCall"
         self.current_ast["map"]["call"] = {
             "type": "data",
-            "source": self.lithium.res.Builtins.integerCall,
+            "source": self.perkeo.res.Builtins.integerCall,
             "span": self.current_ast["span"]
         }
         return self.current_ast
@@ -135,4 +158,6 @@ class Interpreter:
         group["value"] = evaluated
         return evaluated
     def interpretData(self) -> dict:
+        return self.current_ast
+    def interpretNull(self) -> dict:
         return self.current_ast

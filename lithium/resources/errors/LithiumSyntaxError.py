@@ -1,4 +1,4 @@
-class LithiumSyntaxError(SyntaxError):
+class perkeoSyntaxError(SyntaxError):
     def __init__(self, message: str, span: dict[str, int] | None = None):
         self.message = message
         self.span = span

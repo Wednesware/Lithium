@@ -9,7 +9,7 @@ class LegacyBuiltins:
         if isinstance(value, list):
             value = value[0] if value else None
 
-        raise interpreter.lithium.res.ReturnSignal(value)
+        raise interpreter.perkeo.res.ReturnSignal(value)
 
 
     @staticmethod
@@ -19,7 +19,7 @@ class LegacyBuiltins:
         if isinstance(value, list):
             value = value[0] if value else None
 
-        if isinstance(value, interpreter.lithium.res.BuiltinInfo):
+        if isinstance(value, interpreter.perkeo.res.BuiltinInfo):
             return value.handler(
                 interpreter,
                 node,
@@ -64,16 +64,16 @@ class LegacyBuiltins:
         with open(path, encoding="utf-8") as file:
             source = file.read()
 
-        parser = interpreter.lithium.res.Parser(
-            interpreter.lithium,
+        parser = interpreter.perkeo.res.Parser(
+            interpreter.perkeo,
             source,
         )
 
         ast = parser.parse()
 
-        module_scope = interpreter.lithium.res.Scope(
+        module_scope = interpreter.perkeo.res.Scope(
             parent=interpreter.global_scope,
-            lithium=interpreter.lithium,
+            perkeo=interpreter.perkeo,
         )
 
         interpreter.execute(
