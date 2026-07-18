@@ -10,7 +10,6 @@ class Stringifier:
             return str(ast)
         if self.interpreter.perkeo.getsetting("verbose"):
             print(f"{os.path.basename(self.interpreter.perkeo.file_path)}: now stringifying: {ast['type']} at {self.interpreter.current_ast.get('span', '(unknown)')}")
-            print(ast)
         if allow_custom_stringification and ast.get("stringify"):
             return ast["stringify"](ast)
         try:

@@ -37,7 +37,8 @@ class Builtins:
                         "source": source or getattr(Builtins, source_name or name),
                         "span": interpreter.perkeo.res.Token.emptySpan()
                     }
-                }
+                },
+                "span": interpreter.perkeo.res.Token.emptySpan()
             }
         }
 
@@ -243,10 +244,12 @@ class Builtins:
     def print(interpreter, target, value: "any" = None, to: "identifier|array" = None, lib: "identifier|array" = None) -> None: # type: ignore
         print(interpreter.stringifier.stringify(value))
     @staticmethod
-    def import_(interpreter, target, value: "identifier|array|string" = None, sheet: "identifier|array|string" = None) -> dict | None: # type: ignore
+    def import_(interpreter, target, value: "identifier|array|string" = None, sheet: "identifier|array|string" = None) -> None: # type: ignore
         if sheet:
             for single_value in (sheet["items"] if sheet["type"] == "array" else [sheet]):
-                pkis_path: str = os.path.join(os.path.dirname(interpreter.perkeo.file_path), single_value["value"] + ".pkis")
+                base_dir: str = os.path.join(interpreter.perkeo.path, "resources", "libpkis") if single_value["value"].startswith("pko:") else os.path.dirname(interpreter.perkeo.file_path)
+                file_name: str = f"{single_value["value"].removeprefix("pko:")}.pkis"
+                pkis_path: str = os.path.join(base_dir, file_name)
                 if not os.path.isfile(pkis_path):
                     interpreter.eh.throw("sheetNotFound", f"could not find import sheet file \"{single_value['value']}.pkis\"")
                 with open(pkis_path) as file:
@@ -265,6 +268,14 @@ class Builtins:
                 match path.split(".")[-1]:
                     case "pk":
                         interpreter = interpreter.perkeo.script.runpk(path)["interpreter"]
+                        if parts[-1] == "map":
+                            interpreter.scopes[-1].set(parts[-2], {
+                                "type": "map",
+                                "map": {k.removeprefix("_pko_"): (Builtins.getASTOf(interpreter, k.removeprefix("_pko_"), source=v)[k.removeprefix("_pko_")] if v["type"] == "function" else v) for k, v in interpreter.scopes[-1].items() if k.startswith("_pko_")},
+                                "truthiness": lambda x: bool(x["map"]),
+                                "span": single_value["span"]
+                            })
+                            continue
                         result: dict | None = interpreter.findVariable(parts[-1], scopes=["global"], error=False)
                         if not result:
                             interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{parts[-1]}\"\nin the global scope from imported source \"{'.'.join(parts[:-1])}\"")
@@ -273,6 +284,14 @@ class Builtins:
                         spec = importlib.util.spec_from_file_location(parts[-1], path)
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
+                        if parts[-1] == "map":
+                            interpreter.scopes[-1].set(parts[-2], {
+                                "type": "map",
+                                "map": {k.removeprefix("_pko_"): (Builtins.getASTOf(interpreter, k.removeprefix("_pko_"), source=v)[k.removeprefix("_pko_")] if callable(v) else v) for k, v in vars(module).items() if k.startswith("_pko_")},
+                                "truthiness": lambda x: bool(x["map"]),
+                                "span": single_value["span"]
+                            })
+                            continue
                         raw_value = getattr(module, f"_pko_{parts[-1]}", None)
                         if raw_value is None:
                             interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{parts[-1]}\"\nin the global scope from imported source \"{'.'.join(parts[:-1])}\"")

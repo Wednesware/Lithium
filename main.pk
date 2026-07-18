@@ -1,1 +1,8 @@
-import module.age
+import sheet::"pko:printAndClear"
+import pko.sys.map
+
+print "hi"
+
+sys.wait 1
+
+clear

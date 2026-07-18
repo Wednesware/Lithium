@@ -41,6 +41,28 @@ class Interpreter:
                 return scope.get(ident)
         if error:
             self.eh.throw("scopeError", f"identifier '{ident}' is not associated with a value in any scope.")
+    def _resolve_dotted_identifier(self, ident: str) -> dict | None:
+        if "." not in ident:
+            return None
+
+        parts = ident.split(".")
+        base = self.findVariable(parts[0], error=False)
+        if base is None:
+            return None
+
+        current = base
+        for index, part in enumerate(parts[1:], start=1):
+            if not isinstance(current, dict):
+                self.eh.throw("scopeError", f"identifier '{ident}' cannot access member '{part}' on non-object value.")
+            current_map = current.get("map")
+            if not isinstance(current_map, dict):
+                self.eh.throw("scopeError", f"identifier '{ident}' cannot access member '{part}' on non-object value.")
+            if part not in current_map:
+                owner_path = ".".join(parts[:index])
+                self.eh.throw("scopeError", f"identifier '{owner_path}' has no member '{part}'.")
+            current = current_map[part]
+
+        return current
     def interpret(self) -> dict | None:
         self.ast_history.append(self.current_ast)
         try:
@@ -97,21 +119,53 @@ class Interpreter:
         self.current_call = None
         self.current_call_target = None
         if target["map"].get("call") and (target["map"]["call"]["type"] == "data"):
+            signature = inspect.signature(target["map"]["call"]["source"])
             provided_arguments: int = len(call["args"]["map"])
             expected_arguments: int = target["map"]["call"]["source"].__code__.co_argcount - 2
             required_arguments: int = sum(
                 p.default is inspect.Parameter.empty
-                for p in inspect.signature(target["map"]["call"]["source"]).parameters.values()
+                for p in signature.parameters.values()
             ) - 2
             for k, v in args["map"].items():
                 if v is None:
                     continue
-                self.current_ast = v
-                exp_types: list[str] = [t.strip() for t in inspect.signature(target["map"]["call"]["source"]).parameters[k].annotation.split("|")]
+                if isinstance(v, dict):
+                    self.current_ast = v
+                try:
+                    parameter = signature.parameters[k]
+                except KeyError:
+                    self.eh.throw("noMatchingParameter", f"'{target['name']}' does not have a parameter matching '{k}'")
+
+                annotation = parameter.annotation
+                if annotation is inspect.Parameter.empty:
+                    exp_types: list[str] = ["any"]
+                elif isinstance(annotation, str):
+                    exp_types = [t.strip() for t in annotation.split("|")]
+                else:
+                    exp_types = [str(annotation)]
+
                 if ("idarray" in exp_types) and ("array" not in exp_types):
                     exp_types.append("array")
-                if v["type"] not in exp_types and "any" not in exp_types:
-                    self.eh.throw("typeError", f"parameter '{k}' expects one of these types: [{' '.join(exp_types)}], not {v['type']}.")
+
+                if isinstance(v, dict):
+                    value_type: str = v.get("type", "map")
+                elif isinstance(v, bool):
+                    value_type = "boolean"
+                elif isinstance(v, int):
+                    value_type = "integer"
+                elif isinstance(v, float):
+                    value_type = "float"
+                elif isinstance(v, str):
+                    value_type = "string"
+                elif isinstance(v, list):
+                    value_type = "array"
+                elif v is None:
+                    value_type = "null"
+                else:
+                    value_type = type(v).__name__
+
+                if value_type not in exp_types and "any" not in exp_types:
+                    self.eh.throw("typeError", f"parameter '{k}' expects one of these types: [{' '.join(exp_types)}], not {value_type}.")
             if provided_arguments > expected_arguments:
                 self.eh.throw("tooManyArguments", f"too many arguments provided to {target['name']}. ({provided_arguments} prov. vs max of {expected_arguments} expected)")
             if provided_arguments < required_arguments:
@@ -129,6 +183,9 @@ class Interpreter:
                     return self.current_ast
             except KeyError:
                 self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
+        dotted_match = self._resolve_dotted_identifier(self.current_ast["value"])
+        if dotted_match is not None:
+            return dotted_match
         match = self.findVariable(self.current_ast["value"])
         return match
     def interpretMap(self) -> dict:

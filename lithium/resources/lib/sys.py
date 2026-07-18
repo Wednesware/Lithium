@@ -1,4 +1,4 @@
-import time
+import time, subprocess
 
 
 def _pko_wait(interpreter, target, value: "float|integer") -> None: # type: ignore
@@ -15,3 +15,6 @@ def _pko_rmoutput(interpreter, target, value: "identifier") -> None: # type: ign
         if value["value"] not in interpreter.outputs:
             interpreter.eh.throw("invalidOutput", f"output target '{value['value']}' is not in the list of outputs.")
         interpreter.outputs.remove(value["value"])
+        
+def _pko_console(interpreter, target, value: "string|identifier") -> None: # type: ignore
+    subprocess.run(value["value"], shell=True, check=True)
