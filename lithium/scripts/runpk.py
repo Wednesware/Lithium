@@ -3,7 +3,8 @@ import os
 from sys import argv
 
 
-def runpk(perkeo, path: str | None = None) -> dict:
+def runpk(perkeo, path: str | None = None, override_perkeo: str | None = None) -> dict:
+    perkeo = override_perkeo or perkeo
     if path is None:
         if len(argv) < 2:
             raise SystemExit("Usage: pko <file.pk>")

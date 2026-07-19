@@ -23,13 +23,38 @@ class Stringifier:
         return self.interpreter.perkeo.source.splitlines()[ast["span"]["line"] - 1]
     def stringifyIdentifier(self, ast: dict) -> str:
         return ast["value"]
+
+    def _stringify_raw_value(self, value) -> str:
+        if isinstance(value, dict):
+            if value.get("type"):
+                return self.stringify(value)
+            return str(value)
+        if isinstance(value, list):
+            return f"[{' '.join([self._stringify_raw_value(item) for item in value])}]"
+        if isinstance(value, str):
+            return Stringifier._quote(value)
+        if value is None:
+            return "null"
+        return str(value)
+
+    def _stringify_raw_entry(self, key: str, value) -> str:
+        if isinstance(value, str):
+            if key == "type":
+                return value
+            if key == "text":
+                return value
+            return Stringifier._quote(value)
+        return self._stringify_raw_value(value)
+
     def stringifyMap(self, ast: dict) -> str:
         result: dict = {}
+        if ast.get("raw"):
+            return f"{{{' '.join([(k + '::' + self._stringify_raw_entry(k, v)) for k, v in ast['map'].items()])}}}"
         for k, v in ast["map"].items():
-            if v["type"] == "string":
+            if isinstance(v, dict) and v.get("type") == "string":
                 result[k] = Stringifier._quote(v["value"])
             else:
-                result[k] = self.stringify(v)
+                result[k] = self._stringify_raw_value(v)
         return f"{{{' '.join([((k + '::' + v) if k != 'value' else v) for k, v in result.items()])}}}"
     def stringifyString(self, ast: dict) -> str:
         return ast["value"]

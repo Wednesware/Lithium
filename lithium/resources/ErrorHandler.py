@@ -1,6 +1,6 @@
 import os, sys
 
-from ww.mg.color import Color
+from ww.mg26_11.color import Color
 
 
 class ErrorHandler:
@@ -15,7 +15,7 @@ class ErrorHandler:
     def getParts(self, span: dict) -> tuple[str, str, str]:
         line: str = ""
         if len(self.interpreter.perkeo.source.splitlines()):
-            lines: str = self.interpreter.perkeo.source.splitlines()[span['line'] - 1]
+            line: str = self.interpreter.perkeo.source.splitlines()[span['line'] - 1]
         return (
             f"{line[0:span['column'] - 1]}",
             f"{line[span['column'] - 1:span['end_column'] - 1]}",

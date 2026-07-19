@@ -12,7 +12,9 @@ class Interpreter:
         self.stringifier = self.perkeo.res.Stringifier(self)
         self.outputs: list[str] = ["terminal"]
         self.posts: list[str] = []
-        builtins = self.perkeo.res.Builtins.getASTOf(self, "import", "import_") | {
+        builtins = {
+            "import": self.perkeo.res.Builtins.getASTOf(self, "import", "import_")["import"],
+            "export": self.perkeo.res.Builtins.getASTOf(self, "export", "export_")["export"],
             "true": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
             "on": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
             "enabled": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},

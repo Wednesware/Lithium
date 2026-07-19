@@ -14,3 +14,13 @@ def _pko_id(interpreter, target, value: "string") -> dict: # type: ignore
         "map": {},
         "span": value["span"],
     }
+    
+#def _pko_ast(interpreter, target, value: "any") -> dict: # type: ignore
+#    span = value["span"] if isinstance(value, dict) and "span" in value else interpreter.current_ast["span"]
+#    return {
+#        "type": "map",
+#        "raw": True,
+#        "map": value,
+#        "truthiness": lambda x: bool(x["map"]),
+#        "span": span,
+#    }

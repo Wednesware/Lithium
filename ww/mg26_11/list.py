@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .groups import Group
+from .group import Group
 
 
 class ListNav(list):

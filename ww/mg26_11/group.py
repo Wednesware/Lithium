@@ -10,8 +10,8 @@ class Labeled:
     def __repr__(self) -> str:
         return repr(self.obj)
     
-MATCH_LABELS: str = "(self.label == obj.label) if hasattr(obj, 'label') else True"
-MATCH_LABELS_DISALLOW_UNLABELED: str = "(self.label == obj.label) if hasattr(obj, 'label') else False"
+MATCH_LABELS: str = "(self.label == obj.label) if hasattr(obj, 'label') else False"
+MATCH_LABELS_ALLOW_UNLABELED: str = "(self.label == obj.label) if hasattr(obj, 'label') else True"
 
 class Group:
     def __init__(self, label: str, ruleset: list[str], debug_group: bool = False) -> None:

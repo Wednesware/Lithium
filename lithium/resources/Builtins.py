@@ -1,5 +1,7 @@
-from concurrent.futures import interpreter
-import os, importlib, importlib.util
+import copy
+import importlib
+import importlib.util
+import os
 
 
 class Builtins:
@@ -41,6 +43,74 @@ class Builtins:
                 "span": interpreter.perkeo.res.Token.emptySpan()
             }
         }
+
+    @staticmethod
+    def _as_identifier_nodes(value: dict | None) -> list[dict]:
+        if value is None:
+            return []
+
+        if value.get("type") == "array":
+            nodes = value.get("items", [])
+        else:
+            nodes = [value]
+
+        identifiers: list[dict] = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            if node.get("type") in {"identifier", "string"} and isinstance(node.get("value"), str):
+                identifiers.append(node)
+        return identifiers
+
+    @staticmethod
+    def _node_from_python_value(value, span: dict, interpreter) -> dict:
+        if isinstance(value, dict) and value.get("type"):
+            return copy.deepcopy(value)
+        if isinstance(value, bool):
+            return {"type": "boolean", "value": value, "map": {}, "span": dict(span)}
+        if isinstance(value, int):
+            return {"type": "integer", "value": value, "map": {}, "span": dict(span)}
+        if isinstance(value, float):
+            return {"type": "float", "value": value, "map": {}, "span": dict(span)}
+        if isinstance(value, str):
+            return {"type": "string", "value": value, "map": {}, "span": dict(span)}
+        if value is None:
+            return {"type": "null", "map": {}, "span": dict(span)}
+        if isinstance(value, (list, tuple)):
+            return {
+                "type": "array",
+                "items": [Builtins._node_from_python_value(item, span, interpreter) for item in value],
+                "map": {},
+                "span": dict(span),
+            }
+        return {"type": "data", "source": value, "map": {}, "span": dict(span)}
+
+    @staticmethod
+    def _load_pk_exports(interpreter, path: str) -> dict[str, dict]:
+        library_interpreter = interpreter.perkeo.script.runpk(
+            path,
+            override_perkeo=interpreter.perkeo.__class__(interpreter.perkeo.path, "lithium"),
+        )["interpreter"]
+        library_global_scope = library_interpreter.scopes[0]
+        return {
+            key: copy.deepcopy(value)
+            for key, value in library_global_scope.vars.items()
+            if isinstance(value, dict) and value.get("exported")
+        }
+
+    @staticmethod
+    def _load_py_exports(module, span: dict, interpreter) -> dict[str, dict]:
+        exports: dict[str, dict] = {}
+        for key, value in vars(module).items():
+            if not key.startswith("_pko_"):
+                continue
+
+            export_name = key.removeprefix("_pko_")
+            if callable(value):
+                exports[export_name] = Builtins.getASTOf(interpreter, export_name, source=value)[export_name]
+            else:
+                exports[export_name] = Builtins._node_from_python_value(value, span, interpreter)
+        return exports
 
     @staticmethod
     def _as_number(node: dict) -> int | float:
@@ -243,86 +313,102 @@ class Builtins:
     @staticmethod
     def print(interpreter, target, value: "any" = None, to: "identifier|array" = None, lib: "identifier|array" = None) -> None: # type: ignore
         print(interpreter.stringifier.stringify(value))
+
     @staticmethod
     def import_(interpreter, target, value: "identifier|array|string" = None, sheet: "identifier|array|string" = None) -> None: # type: ignore
         if sheet:
-            for single_value in (sheet["items"] if sheet["type"] == "array" else [sheet]):
-                base_dir: str = os.path.join(interpreter.perkeo.path, "resources", "libpkis") if single_value["value"].startswith("pko:") else os.path.dirname(interpreter.perkeo.file_path)
-                file_name: str = f"{single_value["value"].removeprefix("pko:")}.pkis"
+            for single_value in Builtins._as_identifier_nodes(sheet):
+                sheet_name = single_value["value"]
+                base_dir: str = os.path.join(interpreter.perkeo.path, "resources", "libpkis") if sheet_name.startswith("pko:") else os.path.dirname(interpreter.perkeo.file_path)
+                file_name: str = f"{sheet_name.removeprefix('pko:')}.pkis"
                 pkis_path: str = os.path.join(base_dir, file_name)
                 if not os.path.isfile(pkis_path):
                     interpreter.eh.throw("sheetNotFound", f"could not find import sheet file \"{single_value['value']}.pkis\"")
                 with open(pkis_path) as file:
                     content: str = file.read()
                 for import_id in content.splitlines():
-                    Builtins.import_(interpreter, target, {"type": "identifier", "value": import_id, "map": {}, "span": single_value["span"]})
+                    import_name = import_id.strip()
+                    if not import_name or import_name.startswith("#"):
+                        continue
+                    Builtins.import_(interpreter, target, {"type": "identifier", "value": import_name, "map": {}, "span": single_value["span"]})
         if value:
-            for single_value in (value["items"] if value["type"] == "array" else [value]):
+            for single_value in Builtins._as_identifier_nodes(value):
                 parts: list[str] = single_value["value"].split(".")
-                try:
-                    path: str = os.path.join(interpreter.perkeo.path, "resources", "lib", *parts[1:-2], parts[-2] + ".py") if parts[0] == "pko" else os.path.join(os.path.dirname(interpreter.perkeo.file_path), *parts[:-2], parts[-2] + ".pk")
-                except IndexError:
+                if len(parts) < 2:
                     interpreter.eh.throw("incompleteImport", "you must provide a specific variable to import from that source.")
+
+                source_parts = parts[:-1]
+                import_name = parts[-1]
+                source_name = ".".join(source_parts)
+
+                if parts[0] == "pko":
+                    if len(parts) < 3:
+                        interpreter.eh.throw("incompleteImport", "you must provide a specific variable to import from that source.")
+                    path = os.path.join(interpreter.perkeo.path, "resources", "lib", *parts[1:-1]) + ".py"
+                else:
+                    path = os.path.join(os.path.dirname(interpreter.perkeo.file_path), *parts[:-1]) + ".pk"
+
                 if not os.path.isfile(path):
-                    interpreter.eh.throw("sourceNotFound", f"could not find a source file for \"{'.'.join(parts[:-1])}\"")
+                    interpreter.eh.throw("sourceNotFound", f"could not find a source file for \"{source_name}\"")
+
                 match path.split(".")[-1]:
                     case "pk":
-                        interpreter = interpreter.perkeo.script.runpk(path)["interpreter"]
-                        if parts[-1] == "*map":
-                            interpreter.scopes[-1].set(parts[-2], {
+                        exports = Builtins._load_pk_exports(interpreter, path)
+                        if import_name == "map":
+                            interpreter.scopes[-1].set(source_parts[-1], {
                                 "type": "map",
-                                "map": {k: (Builtins.getASTOf(interpreter, k, source=v)[k] if v["type"] == "function" else v) for k, v in interpreter.scopes[-1].items() if k.startswith("_pko_") and v.get("exported")},
+                                "map": exports,
                                 "truthiness": lambda x: bool(x["map"]),
                                 "span": single_value["span"]
                             })
                             continue
-                        elif parts[-1] == "*":
-                            for k, v in interpreter.scopes[-1].items():
-                                if v.get("exported"):
-                                    result: dict = Builtins.getASTOf(interpreter, k.removeprefix("_pko_"), source=v)
-                                    interpreter.scopes[-1].set(k.removeprefix("_pko_"), result[k.removeprefix("_pko_")])
+                        elif import_name == "merge":
+                            for key, export_value in exports.items():
+                                interpreter.scopes[-1].set(key, export_value)
                             continue
-                        result: dict | None = interpreter.findVariable(parts[-1], scopes=["global"], error=False)
-                        if not result:
-                            interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{parts[-1]}\"\nin the global scope from imported source \"{'.'.join(parts[:-1])}\"")
-                        interpreter.scopes[-1].set(parts[-1], result[parts[-1]])
+                        if import_name not in exports:
+                            interpreter.eh.throw("importScopeError", f"could not find exported identifier \"{import_name}\" in source \"{source_name}\"")
+                        # Importing a specific symbol from a .pk module also makes
+                        # the module's exported values available in caller scope.
+                        for key, export_value in exports.items():
+                            interpreter.scopes[-1].set(key, copy.deepcopy(export_value))
                     case "py":
-                        spec = importlib.util.spec_from_file_location(parts[-1], path)
+                        spec = importlib.util.spec_from_file_location(source_parts[-1], path)
+                        if spec is None or spec.loader is None:
+                            interpreter.eh.throw("sourceNotFound", f"could not load python source for \"{source_name}\"")
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
-                        if parts[-1] == "map":
-                            interpreter.scopes[-1].set(parts[-2], {
+
+                        exports = Builtins._load_py_exports(module, single_value["span"], interpreter)
+                        if import_name == "map":
+                            interpreter.scopes[-1].set(source_parts[-1], {
                                 "type": "map",
-                                "map": {k.removeprefix("_pko_"): (Builtins.getASTOf(interpreter, k.removeprefix("_pko_"), source=v)[k.removeprefix("_pko_")] if callable(v) else v) for k, v in vars(module).items() if k.startswith("_pko_")},
+                                "map": exports,
                                 "truthiness": lambda x: bool(x["map"]),
                                 "span": single_value["span"]
                             })
                             continue
-                        elif parts[-1] == "*":
-                            for k, v in vars(module).items():
-                                if k.startswith("_pko_"):
-                                    result: dict = Builtins.getASTOf(interpreter, k.removeprefix("_pko_"), source=v)
-                                    interpreter.scopes[-1].set(k.removeprefix("_pko_"), result[k.removeprefix("_pko_")])
+                        elif import_name == "merge":
+                            for key, export_value in exports.items():
+                                interpreter.scopes[-1].set(key, export_value)
                             continue
-                        raw_value = getattr(module, f"_pko_{parts[-1]}", None)
-                        if raw_value is None:
-                            interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{parts[-1]}\"\nin the global scope from imported source \"{'.'.join(parts[:-1])}\"")
-                        result: dict = Builtins.getASTOf(interpreter, parts[-1], source=raw_value)
-                        interpreter.scopes[-1].set(parts[-1], result[parts[-1]])
+
+                        if import_name not in exports:
+                            interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{import_name}\"\nin the global scope from imported source \"{source_name}\"")
+                        interpreter.scopes[-1].set(import_name, exports[import_name])
         if not value and not sheet:
             interpreter.eh.throw("tooFewArguments", "'import' expects either library or sheet provided.")
+
+    @staticmethod
     def export_(interpreter, target, value: "identifier|array" = None) -> None: # type: ignore
-        if isinstance(value, str):
-            result = interpreter.findVariable(value, scopes=["global"], error=False)
-            if result and value in result:
-                ast = result[value]
-                if isinstance(ast, dict):
-                    ast["exported"] = True
-        elif isinstance(value, list):
-            for identifier in value:
-                if isinstance(identifier, str):
-                    result = interpreter.findVariable(identifier, scopes=["global"], error=False)
-                    if result and identifier in result:
-                        ast = result[identifier]
-                        if isinstance(ast, dict):
-                            ast["exported"] = True
+        identifiers = Builtins._as_identifier_nodes(value)
+        if not identifiers:
+            interpreter.eh.throw("tooFewArguments", "'export' expects one or more identifiers.")
+
+        for identifier in identifiers:
+            export_name = identifier["value"]
+            ast = interpreter.findVariable(export_name, scopes=["global"], error=False)
+            if ast is None:
+                interpreter.eh.throw("scopeError", f"identifier '{export_name}' is not associated with a value in the global scope.")
+            if isinstance(ast, dict):
+                ast["exported"] = True
