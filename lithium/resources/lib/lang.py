@@ -6,3 +6,11 @@ def _pko_type(interpreter, target, value: "any") -> dict: # type: ignore
         "map": {},
         "span": span,
     }
+    
+def _pko_id(interpreter, target, value: "string") -> dict: # type: ignore
+    return {
+        "type": "identifier",
+        "value": value["value"],
+        "map": {},
+        "span": value["span"],
+    }

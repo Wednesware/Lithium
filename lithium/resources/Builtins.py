@@ -268,13 +268,19 @@ class Builtins:
                 match path.split(".")[-1]:
                     case "pk":
                         interpreter = interpreter.perkeo.script.runpk(path)["interpreter"]
-                        if parts[-1] == "map":
+                        if parts[-1] == "*map":
                             interpreter.scopes[-1].set(parts[-2], {
                                 "type": "map",
-                                "map": {k.removeprefix("_pko_"): (Builtins.getASTOf(interpreter, k.removeprefix("_pko_"), source=v)[k.removeprefix("_pko_")] if v["type"] == "function" else v) for k, v in interpreter.scopes[-1].items() if k.startswith("_pko_")},
+                                "map": {k: (Builtins.getASTOf(interpreter, k, source=v)[k] if v["type"] == "function" else v) for k, v in interpreter.scopes[-1].items() if k.startswith("_pko_") and v.get("exported")},
                                 "truthiness": lambda x: bool(x["map"]),
                                 "span": single_value["span"]
                             })
+                            continue
+                        elif parts[-1] == "*":
+                            for k, v in interpreter.scopes[-1].items():
+                                if v.get("exported"):
+                                    result: dict = Builtins.getASTOf(interpreter, k.removeprefix("_pko_"), source=v)
+                                    interpreter.scopes[-1].set(k.removeprefix("_pko_"), result[k.removeprefix("_pko_")])
                             continue
                         result: dict | None = interpreter.findVariable(parts[-1], scopes=["global"], error=False)
                         if not result:
@@ -292,6 +298,12 @@ class Builtins:
                                 "span": single_value["span"]
                             })
                             continue
+                        elif parts[-1] == "*":
+                            for k, v in vars(module).items():
+                                if k.startswith("_pko_"):
+                                    result: dict = Builtins.getASTOf(interpreter, k.removeprefix("_pko_"), source=v)
+                                    interpreter.scopes[-1].set(k.removeprefix("_pko_"), result[k.removeprefix("_pko_")])
+                            continue
                         raw_value = getattr(module, f"_pko_{parts[-1]}", None)
                         if raw_value is None:
                             interpreter.eh.throw("importScopeError", f"could not find a variable with identifier \"{parts[-1]}\"\nin the global scope from imported source \"{'.'.join(parts[:-1])}\"")
@@ -299,3 +311,18 @@ class Builtins:
                         interpreter.scopes[-1].set(parts[-1], result[parts[-1]])
         if not value and not sheet:
             interpreter.eh.throw("tooFewArguments", "'import' expects either library or sheet provided.")
+    def export_(interpreter, target, value: "identifier|array" = None) -> None: # type: ignore
+        if isinstance(value, str):
+            result = interpreter.findVariable(value, scopes=["global"], error=False)
+            if result and value in result:
+                ast = result[value]
+                if isinstance(ast, dict):
+                    ast["exported"] = True
+        elif isinstance(value, list):
+            for identifier in value:
+                if isinstance(identifier, str):
+                    result = interpreter.findVariable(identifier, scopes=["global"], error=False)
+                    if result and identifier in result:
+                        ast = result[identifier]
+                        if isinstance(ast, dict):
+                            ast["exported"] = True

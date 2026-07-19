@@ -124,6 +124,23 @@ class Parser:
             args = self._parse_argument_map(stop)
             value = self._call(value, args)
 
+        while not self._at_stop(stop) and self._check("ARROW"):
+            block = self._parse_arrow_block()
+            if value["type"] == "identifier":
+                args = self._new_map(self._span_from_node_list(value, block))
+                self._add_positional(args, block)
+                value = self._call(value, args)
+                continue
+            if value["type"] == "call":
+                self._add_positional(value["args"], block)
+                value["span"] = self._merge_spans(value["span"], block["span"])
+                continue
+            self.eh.throwWithSpan(
+                "expectedCallableBeforeArrow",
+                "expected callable value before '->'",
+                block["span"],
+            )
+
         return value
 
     def _parse_comparison(self, stop: set[str]) -> dict[str, any]:

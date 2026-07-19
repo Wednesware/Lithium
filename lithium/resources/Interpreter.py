@@ -249,6 +249,9 @@ class Interpreter:
         evaluated = self.interpret()
         group["value"] = evaluated
         return evaluated
+    def interpretBlock(self) -> dict:
+        # Blocks are first-class values and are executed by control-flow builtins.
+        return self.current_ast
     def interpretData(self) -> dict:
         return self.current_ast
     def interpretNull(self) -> dict:
