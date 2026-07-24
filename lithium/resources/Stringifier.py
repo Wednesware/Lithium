@@ -23,6 +23,10 @@ class Stringifier:
         return self.interpreter.perkeo.source.splitlines()[ast["span"]["line"] - 1]
     def stringifyIdentifier(self, ast: dict) -> str:
         return ast["value"]
+    def stringifyOperator(self, ast: dict) -> str:
+        return ast["value"]
+    def stringifyUnit(self, ast: dict) -> str:
+        return ast["value"]
 
     def _stringify_raw_value(self, value) -> str:
         if isinstance(value, dict):
@@ -60,6 +64,8 @@ class Stringifier:
         return ast["value"]
     def stringifyInteger(self, ast: dict) -> str:
         return str(ast["value"])
+    def stringifyBoolean(self, ast: dict) -> str:
+        return ast["usedalias"]
     def stringifyFloat(self, ast: dict) -> str:
         return str(ast["value"])
     def stringifyArray(self, ast: dict) -> str:
@@ -76,6 +82,8 @@ class Stringifier:
         return str(ast["source"])
     def stringifyNull(self, ast: dict) -> str:
         return "null"
+    def stringifyNan(self, ast: dict) -> str:
+        return "not a number"
     def stringifyGroup(self, ast: dict) -> str:
         return self.interpreter.perkeo.source.splitlines()[ast["span"]["line"] - 1][ast["span"]["column"] - 1:ast["span"]["end_column"] - 1]
     @staticmethod

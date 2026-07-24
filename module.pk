@@ -1,7 +1,6 @@
-import pko.io.print pko.lang.ast
+import pko.io.print
 
 name::"Kass"
-export name
-print (ast name)
 age::14
-export age
+
+export name age

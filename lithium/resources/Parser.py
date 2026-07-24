@@ -16,6 +16,30 @@ class Parser:
 
     LINE_ENDERS = {"NEWLINE", "SEMICOLON", "EOF"}
 
+    DEFAULT_INFIX_PRIORITIES = {
+        "or": 1,
+        "and": 1,
+        "|": 1,
+        "&": 1,
+        "=": 2,
+        "==": 2,
+        "!=": 2,
+        ">": 2,
+        ">=": 2,
+        "<": 2,
+        "<=": 2,
+        ":": 2,
+        "..": 2,
+        "..=": 2,
+        "+": 3,
+        "-": 3,
+        "*": 4,
+        "/": 4,
+        "%": 4,
+        "^": 4,
+        "%*": 4,
+    }
+
     def __init__(
         self,
         perkeo: any = None,
@@ -33,6 +57,8 @@ class Parser:
         self.index = 0
         self.last_tokens: list[Token] = self._tokens
         self.last_ast: dict[str, any] | None = None
+        self.infix_priorities = dict(self.DEFAULT_INFIX_PRIORITIES)
+        self._load_runtime_priorities()
         self.eh = self.perkeo.res.ErrorHandler(self)
 
     def parse(self) -> dict[str, any]:
@@ -78,6 +104,23 @@ class Parser:
             not value or all(hasattr(token, "type") and hasattr(token, "span") for token in value)
         )
 
+    def _load_runtime_priorities(self) -> None:
+        builtins_cls = getattr(getattr(self.perkeo, "res", None), "Builtins", None)
+        if builtins_cls is None:
+            return
+
+        operator_priorities = getattr(builtins_cls, "OPERATOR_PRIORITIES", None)
+        if isinstance(operator_priorities, dict):
+            for symbol, prio in operator_priorities.items():
+                if isinstance(prio, int):
+                    self.infix_priorities[str(symbol)] = prio
+
+        function_priorities = getattr(builtins_cls, "FUNCTION_PRIORITIES", None)
+        if isinstance(function_priorities, dict):
+            for symbol, prio in function_priorities.items():
+                if isinstance(prio, int):
+                    self.infix_priorities[str(symbol)] = prio
+
     def parse_script(self) -> dict[str, any]:
         self._ensure_tokens()
         start = self._peek()
@@ -105,6 +148,18 @@ class Parser:
             value = self._parse_argument_map(stop)
         else:
             value = self.parse_expression(stop=stop, allow_implicit_call=True)
+
+        while self._check("COMMENT"):
+            self._comment()
+
+        if not self._at_stop(stop):
+            token = self._peek()
+            token_text = token.text if token.text else token.type
+            self.eh.throwWithSpan(
+                "unexpectedTokenAfterExpression",
+                f"unexpected token {token_text!r} after expression",
+                token.span,
+            )
 
         return self._node("line", self._span_from_nodes(start, value), value=value)
 
@@ -144,88 +199,25 @@ class Parser:
         return value
 
     def _parse_comparison(self, stop: set[str]) -> dict[str, any]:
-        target = self._parse_additive(stop)
+        return self._parse_precedence(stop=stop, min_precedence=0)
 
-        while not self._at_stop(stop) and self._check("OPERATOR"):
-            operator_token = self._peek()
-            if operator_token.value not in {"=", "==", "!=", ">", ">=", "<", "<=", "|", "&", ":", "..", "..="}:
-                break
-            operator_token = self._advance()
-            if self._at_stop(stop) or not self._starts_value():
-                self.eh.throwWithSpan(
-                    "noValueAfterOperator",
-                    f"expected value after operator {operator_token.text!r}",
-                    operator_token.span,
-                )
-
-            right = self._parse_additive(stop)
-            args_span = self._span_from_node_list(target, right)
-            args = self._new_map(args_span)
-            self._add_positional(args, target)
-            self._add_positional(args, right)
-            target = self._call(
-                self._node("identifier", operator_token.span, value=operator_token.value),
-                args,
-            )
-
-        return target
+    def _is_infix_identifier_call(self) -> bool:
+        if not self._check("IDENTIFIER"):
+            return False
+        if self._peek(1).type == "DOUBLE_COLON":
+            return False
+        if self._peek(1).type in self.LINE_ENDERS | {"EOF", "RPAREN", "RBRACE", "RBRACKET"}:
+            return False
+        return self._peek(1).type in self.VALUE_STARTERS or self._peek(1).type == "COMMENT"
 
     def _parse_additive(self, stop: set[str]) -> dict[str, any]:
-        target = self._parse_multiplicative(stop)
-
-        while not self._at_stop(stop) and self._check("OPERATOR"):
-            operator_token = self._peek()
-            if operator_token.value not in {"+", "-"}:
-                break
-            operator_token = self._advance()
-            if self._at_stop(stop) or not self._starts_value():
-                self.eh.throwWithSpan(
-                    "noValueAfterOperator",
-                    f"expected value after operator {operator_token.text!r}",
-                    operator_token.span,
-                )
-
-            right = self._parse_multiplicative(stop)
-            args_span = self._span_from_node_list(target, right)
-            args = self._new_map(args_span)
-            self._add_positional(args, target)
-            self._add_positional(args, right)
-            target = self._call(
-                self._node("identifier", operator_token.span, value=operator_token.value),
-                args,
-            )
-
-        return target
+        return self._parse_precedence(stop=stop, min_precedence=0)
 
     def _parse_multiplicative(self, stop: set[str]) -> dict[str, any]:
-        target = self._parse_postfix(stop)
-
-        while not self._at_stop(stop) and self._check("OPERATOR"):
-            operator_token = self._peek()
-            if operator_token.value not in {"*", "/", "%", "^", "%*"}:
-                break
-            operator_token = self._advance()
-            if self._at_stop(stop) or not self._starts_value():
-                self.eh.throwWithSpan(
-                    "noValueAfterOperator",
-                    f"expected value after operator {operator_token.text!r}",
-                    operator_token.span,
-                )
-
-            right = self._parse_postfix(stop)
-            args_span = self._span_from_node_list(target, right)
-            args = self._new_map(args_span)
-            self._add_positional(args, target)
-            self._add_positional(args, right)
-            target = self._call(
-                self._node("identifier", operator_token.span, value=operator_token.value),
-                args,
-            )
-
-        return target
+        return self._parse_precedence(stop=stop, min_precedence=0)
 
     def _parse_operator_call(self, stop: set[str]) -> dict[str, any]:
-        return self._parse_additive(stop)
+        return self._parse_precedence(stop=stop, min_precedence=0)
     
     #def _parse_operator_call(self, _) -> dict[str, any]:
     #    token = self._peek()
@@ -234,14 +226,97 @@ class Parser:
     def _parse_postfix(self, stop: set[str]) -> dict[str, any]:
         value = self._parse_primary(stop)
 
-        while not self._at_stop(stop) and self._check("LPAREN"):
-            group = self._parse_group()
-            args = self._new_map(group["span"])
-            if group["value"] is not None:
-                self._add_positional(args, group["value"])
-            value = self._call(value, args, group)
+        while not self._at_stop(stop):
+            if self._check("LPAREN"):
+                group = self._parse_group()
+                args = self._new_map(group["span"])
+                if group["value"] is not None:
+                    self._add_positional(args, group["value"])
+                value = self._call(value, args, group)
+                continue
+
+            if self._is_unit_postfix_call(value):
+                unit_token = self._advance()
+                args = self._new_map(self._span_from_node_list(value, unit_token))
+                self._add_positional(args, value)
+                value = self._call(
+                    self._node("identifier", unit_token.span, value=unit_token.value),
+                    args,
+                    end_token=unit_token,
+                    unit_syntax=True,
+                )
+                continue
+
+            break
 
         return value
+
+    def _parse_precedence(self, stop: set[str], min_precedence: int) -> dict[str, any]:
+        target = self._parse_postfix(stop)
+
+        while not self._at_stop(stop):
+            candidate = self._peek_infix_candidate(target)
+            if candidate is None:
+                break
+
+            token, precedence, operator_syntax = candidate
+            if precedence < min_precedence:
+                break
+
+            operator_token = self._advance()
+            if self._at_stop(stop) or not self._starts_value():
+                self.eh.throwWithSpan(
+                    "noValueAfterOperator",
+                    f"expected value after operator {operator_token.text!r}",
+                    operator_token.span,
+                )
+
+            right = self._parse_precedence(stop=stop, min_precedence=precedence + 1)
+            args_span = self._span_from_node_list(target, right)
+            args = self._new_map(args_span)
+            self._add_positional(args, target)
+            self._add_positional(args, right)
+
+            target_node_type = "operator" if operator_syntax else "identifier"
+            target = self._call(
+                self._node(target_node_type, token.span, value=token.value),
+                args,
+                operator_syntax=operator_syntax,
+            )
+
+        return target
+
+    def _peek_infix_candidate(self, current_target: dict[str, any]) -> tuple[Token, int, bool] | None:
+        if self._check("OPERATOR"):
+            token = self._peek()
+            precedence = self._infix_priority_for_symbol(str(token.value))
+            if precedence is None:
+                return None
+            if not self._starts_value_at_offset(1):
+                return None
+            return token, precedence, True
+
+        if current_target["type"] != "identifier" and self._is_infix_identifier_call():
+            token = self._peek()
+            precedence = self._infix_priority_for_symbol(str(token.value), default=0)
+            return token, precedence, False
+
+        return None
+
+    def _infix_priority_for_symbol(self, symbol: str, default: int | None = None) -> int | None:
+        if symbol in self.infix_priorities:
+            return self.infix_priorities[symbol]
+        return default
+
+    def _is_unit_postfix_call(self, current_value: dict[str, any]) -> bool:
+        if not self._check("IDENTIFIER"):
+            return False
+        if self._peek(1).type == "DOUBLE_COLON":
+            return False
+        if self._starts_value_at_offset(1):
+            return False
+        token = self._peek()
+        return current_value["span"]["end"] == token.span["start"]
 
     def _parse_primary(self, stop: set[str]) -> dict[str, any]:
         token = self._peek()
@@ -257,7 +332,7 @@ class Parser:
             return self._node("string", token.span, value=token.value, text=token.text)
         if self._check("OPERATOR"):
             token = self._advance()
-            return self._node("identifier", token.span, value=token.value)
+            return self._node("operator", token.span, value=token.value)
         if self._match("IDENTIFIER"):
             return self._node("identifier", token.span, value=token.value)
         if self._check("LPAREN"):
@@ -452,6 +527,8 @@ class Parser:
         target: dict[str, any],
         args: dict[str, any],
         end_token: Token | None = None,
+        operator_syntax: bool = False,
+        unit_syntax: bool = False,
     ) -> dict[str, any]:
         span_end = end_token if end_token is not None else args
         return self._node(
@@ -459,7 +536,9 @@ class Parser:
             self._span_from_node_list(target, span_end),
             target=target,
             args=args,
-            current_interp_arg=None
+            current_interp_arg=None,
+            operator_syntax=operator_syntax,
+            unit_syntax=unit_syntax,
         )
 
     def _new_map(self, span: dict[str, int]) -> dict[str, any]:
@@ -518,7 +597,7 @@ class Parser:
             token.span,
             value=token.value["value"],
             style=token.value["style"],
-            text=token.text,
+            text=token.text
         )
 
     def _looks_like_kwarg(self) -> bool:
@@ -526,6 +605,10 @@ class Parser:
 
     def _starts_value(self) -> bool:
         return self._peek().type in self.VALUE_STARTERS or self._check("COMMENT")
+
+    def _starts_value_at_offset(self, offset: int) -> bool:
+        token = self._peek(offset)
+        return token.type in self.VALUE_STARTERS or token.type == "COMMENT"
 
     def _starts_argument(self, stop: set[str]) -> bool:
         if self._at_stop(stop):

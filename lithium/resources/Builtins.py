@@ -26,23 +26,118 @@ class Builtins:
         ":": "span"
     }
 
+    OPERATOR_PRIORITIES = {
+        "|": 1,
+        "&": 1,
+        "=": 2,
+        "==": 2,
+        "!=": 2,
+        ">": 2,
+        ">=": 2,
+        "<": 2,
+        "<=": 2,
+        ":": 2,
+        "..": 2,
+        "..=": 2,
+        "+": 3,
+        "-": 3,
+        "*": 4,
+        "/": 4,
+        "%": 4,
+        "^": 4,
+        "%*": 4,
+    }
+
+    FUNCTION_PRIORITIES = {
+        "or": 1,
+        "and": 1,
+    }
+
     @staticmethod
-    def getASTOf(interpreter, name: str, source_name: str | None = None, source: callable | None = None) -> dict:
-        return {
-            name: {
-                "type": "function",
-                "name": name,
-                "truthiness": lambda _: True,
-                "map": {
-                    "call": {
-                        "type": "data",
-                        "source": source or getattr(Builtins, source_name or name),
-                        "span": interpreter.perkeo.res.Token.emptySpan()
-                    }
-                },
-                "span": interpreter.perkeo.res.Token.emptySpan()
-            }
+    def _callable_priority(source: callable | None, default: int | None = None) -> int | None:
+        if source is None:
+            return default
+        for attr_name in ("prio", "_pko_prio"):
+            attr_value = getattr(source, attr_name, None)
+            if isinstance(attr_value, int):
+                return attr_value
+        return default
+
+    @staticmethod
+    def getASTOf(interpreter, name: str, source_name: str | None = None, source: callable | None = None, fn_name: str | None = None, prio: int | None = None) -> dict:
+        resolved_source = source or getattr(Builtins, source_name or name)
+        resolved_prio = Builtins._callable_priority(
+            resolved_source,
+            default=prio if prio is not None else Builtins.FUNCTION_PRIORITIES.get(name),
+        )
+        function_node: dict = {
+            "type": "function",
+            "name": name,
+            "truthiness": lambda _: True,
+            "map": {
+                "call": {
+                    "type": "data",
+                    "source": resolved_source,
+                    "span": interpreter.perkeo.res.Token.emptySpan()
+                }
+            },
+            "span": interpreter.perkeo.res.Token.emptySpan()
         }
+        if resolved_prio is not None:
+            function_node["prio"] = resolved_prio
+        return {
+            name: function_node
+        }
+
+    @staticmethod
+    def getOperatorASTOf(interpreter, name: str, source_name: str | None = None, source: callable | None = None, prio: int | None = None) -> dict:
+        resolved_source = source or getattr(Builtins, source_name or name)
+        resolved_prio = Builtins._callable_priority(
+            resolved_source,
+            default=prio if prio is not None else Builtins.OPERATOR_PRIORITIES.get(name),
+        )
+        operator_node: dict = {
+            "type": "operator",
+            "value": name,
+            "truthiness": lambda _: True,
+            "map": {
+                "call": {
+                    "type": "data",
+                    "source": resolved_source,
+                    "span": interpreter.perkeo.res.Token.emptySpan()
+                }
+            },
+            "span": interpreter.perkeo.res.Token.emptySpan()
+        }
+        if resolved_prio is not None:
+            operator_node["prio"] = resolved_prio
+        return {
+            name: operator_node
+        }
+
+    @staticmethod
+    def getUnitASTOf(interpreter, name: str, source_name: str | None = None, source: callable | None = None, prio: int | None = None) -> dict:
+        resolved_source = source or getattr(Builtins, source_name or name)
+        resolved_prio = Builtins._callable_priority(
+            resolved_source,
+            default=prio,
+        )
+        unit_node: dict = {
+            "type": "unit",
+            "value": name,
+            "truthiness": lambda _: True,
+            "map": {
+                "call": {
+                    "type": "data",
+                    "source": resolved_source,
+                    "span": interpreter.perkeo.res.Token.emptySpan()
+                }
+            },
+            "span": interpreter.perkeo.res.Token.emptySpan()
+        }
+        if resolved_prio is not None:
+            unit_node["prio"] = resolved_prio
+        return {name: unit_node}
 
     @staticmethod
     def _as_identifier_nodes(value: dict | None) -> list[dict]:
@@ -67,13 +162,13 @@ class Builtins:
         if isinstance(value, dict) and value.get("type"):
             return copy.deepcopy(value)
         if isinstance(value, bool):
-            return {"type": "boolean", "value": value, "map": {}, "span": dict(span)}
+            return {"type": "boolean", "value": value, "map": {}, "usedalias": str(value).lower(), "truthiness": lambda x: bool(x["value"]), "span": dict(span)}
         if isinstance(value, int):
-            return {"type": "integer", "value": value, "map": {}, "span": dict(span)}
+            return {"type": "integer", "value": value, "map": {}, "truthiness": lambda x: bool(x["value"]), "span": dict(span)}
         if isinstance(value, float):
-            return {"type": "float", "value": value, "map": {}, "span": dict(span)}
+            return {"type": "float", "value": value, "map": {}, "truthiness": lambda x: bool(x["value"]), "span": dict(span)}
         if isinstance(value, str):
-            return {"type": "string", "value": value, "map": {}, "span": dict(span)}
+            return {"type": "string", "value": value, "map": {}, "truthiness": lambda x: bool(x["value"]), "span": dict(span)}
         if value is None:
             return {"type": "null", "map": {}, "span": dict(span)}
         if isinstance(value, (list, tuple)):
@@ -121,8 +216,12 @@ class Builtins:
     @staticmethod
     def _wrap_number(value: int | float, span: dict) -> dict:
         if isinstance(value, float):
-            return {"type": "float", "value": value, "map": {}, "span": dict(span)}
-        return {"type": "integer", "value": value, "map": {}, "span": dict(span)}
+            return {"type": "float", "value": value, "map": {}, "span": dict(span), "truthiness": lambda x: bool(x["value"])}
+        return {"type": "integer", "value": value, "map": {}, "span": dict(span), "truthiness": lambda x: bool(x["value"])}
+
+    @staticmethod
+    def _wrap_boolean(value: int | float, span: dict) -> dict:
+        return {"type": "boolean", "value": value, "map": {}, "span": dict(span), "truthiness": lambda x: bool(x["value"]), "usedalias": str(bool(value)).lower()}
 
     @staticmethod
     def _binary_items(value: dict) -> tuple[dict, dict]:
@@ -144,7 +243,7 @@ class Builtins:
         return items[0], items[1]
 
     @staticmethod
-    def integerCall(interpreter, target, value: "integer|float") -> dict: # type: ignore
+    def integerCall(interpreter, target, value: "array") -> dict: # type: ignore
         if value.get("type") not in {"integer", "float"}:
             raise TypeError(f"expected numeric literal, got {value.get('type')!r}")
         return value
@@ -175,6 +274,9 @@ class Builtins:
         left, right = Builtins._binary_items(value)
         left_value = Builtins._as_number(left)
         right_value = Builtins._as_number(right)
+        if not right_value:
+            interpreter.eh.throw("divisionByZero", "division by zero is not allowed, returning nan.", warning=True)
+            return {"type": "nan", "map": {}, "span": value["span"], "truthiness": lambda x: False}
         return Builtins._wrap_number(left_value / right_value, value["span"])
 
     @staticmethod
@@ -203,56 +305,52 @@ class Builtins:
         left, right = Builtins._binary_items(value)
         left_value = Builtins._as_number(left)
         right_value = Builtins._as_number(right)
-        return Builtins._wrap_number(1 if left_value == right_value else 0, value["span"])
+        return Builtins._wrap_boolean(left_value == right_value, value["span"])
 
     @staticmethod
     def ne(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binary_items(value)
         left_value = Builtins._as_number(left)
         right_value = Builtins._as_number(right)
-        return Builtins._wrap_number(1 if left_value != right_value else 0, value["span"])
+        return Builtins._wrap_boolean(left_value != right_value, value["span"])
 
     @staticmethod
     def gt(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binary_items(value)
         left_value = Builtins._as_number(left)
         right_value = Builtins._as_number(right)
-        return Builtins._wrap_number(1 if left_value > right_value else 0, value["span"])
+        return Builtins._wrap_boolean(left_value > right_value, value["span"])
 
     @staticmethod
     def gte(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binary_items(value)
         left_value = Builtins._as_number(left)
         right_value = Builtins._as_number(right)
-        return Builtins._wrap_number(1 if left_value >= right_value else 0, value["span"])
+        return Builtins._wrap_boolean(left_value >= right_value, value["span"])
 
     @staticmethod
     def lt(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binary_items(value)
         left_value = Builtins._as_number(left)
         right_value = Builtins._as_number(right)
-        return Builtins._wrap_number(1 if left_value < right_value else 0, value["span"])
+        return Builtins._wrap_boolean(left_value < right_value, value["span"])
 
     @staticmethod
     def lte(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binary_items(value)
         left_value = Builtins._as_number(left)
         right_value = Builtins._as_number(right)
-        return Builtins._wrap_number(1 if left_value <= right_value else 0, value["span"])
+        return Builtins._wrap_boolean(left_value <= right_value, value["span"])
     
     @staticmethod
     def logicor(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binary_items(value)
-        left_value = Builtins._as_number(left)
-        right_value = Builtins._as_number(right)
-        return Builtins._wrap_number(left_value if left["truthiness"](left) else right_value, value["span"])
+        return Builtins._wrap_number(left["value"] if left["truthiness"](left) else right["value"], value["span"])
     
     @staticmethod
     def logicand(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binary_items(value)
-        left_value = Builtins._as_number(left)
-        right_value = Builtins._as_number(right)
-        return Builtins._wrap_number(left_value if not left["truthiness"](left) else right_value, value["span"])
+        return Builtins._wrap_number(left["value"] if not left["truthiness"](left) else right["value"], value["span"])
     
     @staticmethod
     def range(interpreter, target, value: "array") -> dict: # type: ignore
@@ -319,8 +417,8 @@ class Builtins:
         if sheet:
             for single_value in Builtins._as_identifier_nodes(sheet):
                 sheet_name = single_value["value"]
-                base_dir: str = os.path.join(interpreter.perkeo.path, "resources", "libpkis") if sheet_name.startswith("pko:") else os.path.dirname(interpreter.perkeo.file_path)
-                file_name: str = f"{sheet_name.removeprefix('pko:')}.pkis"
+                base_dir: str = os.path.join(interpreter.perkeo.path, "resources", "libpkis") if sheet_name.startswith("pko.") else os.path.dirname(interpreter.perkeo.file_path)
+                file_name: str = f"{sheet_name.removeprefix('pko.')}.pkis"
                 pkis_path: str = os.path.join(base_dir, file_name)
                 if not os.path.isfile(pkis_path):
                     interpreter.eh.throw("sheetNotFound", f"could not find import sheet file \"{single_value['value']}.pkis\"")

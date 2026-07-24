@@ -1,3 +1,4 @@
-import module.map pko.io.print
+import pko.logic.merge
+import pko.io.merge
 
-print module.name module.age
+print 4 / 0

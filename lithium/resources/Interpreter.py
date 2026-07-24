@@ -15,18 +15,19 @@ class Interpreter:
         builtins = {
             "import": self.perkeo.res.Builtins.getASTOf(self, "import", "import_")["import"],
             "export": self.perkeo.res.Builtins.getASTOf(self, "export", "export_")["export"],
-            "true": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
-            "on": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
-            "enabled": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
-            "yes": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
-            "false": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
-            "off": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
-            "disabled": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
-            "no": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "true": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "true", "truthiness": lambda x: bool(x["value"])},
+            "on": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "on", "truthiness": lambda x: bool(x["value"])},
+            "enabled": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "enabled", "truthiness": lambda x: bool(x["value"])},
+            "yes": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "yes", "truthiness": lambda x: bool(x["value"])},
+            "false": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "false", "truthiness": lambda x: bool(x["value"])},
+            "off": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "off", "truthiness": lambda x: bool(x["value"])},
+            "disabled": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "disabled", "truthiness": lambda x: bool(x["value"])},
+            "no": {"type": "boolean", "value": False, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "no", "truthiness": lambda x: bool(x["value"])},
             "null": {"type": "null", "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}},
+            "nan": {"type": "nan", "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}}
         }
         for operator_name, source_name in self.perkeo.res.Builtins.OPERATOR_BUILTINS.items():
-            builtins.update(self.perkeo.res.Builtins.getASTOf(self, operator_name, source_name))
+            builtins.update(self.perkeo.res.Builtins.getOperatorASTOf(self, operator_name, source_name))
         self.scopes: list = [
             self.perkeo.res.Scope(self, "global", builtins)
         ]
@@ -65,6 +66,36 @@ class Interpreter:
             current = current_map[part]
 
         return current
+    def _expected_types_for_parameter(self, parameter: inspect.Parameter) -> list[str]:
+        annotation = parameter.annotation
+        if annotation is inspect.Parameter.empty:
+            exp_types: list[str] = ["any"]
+        elif isinstance(annotation, str):
+            exp_types = [item.strip() for item in annotation.split("|") if item.strip()]
+        else:
+            exp_types = [str(annotation)]
+
+        if not exp_types:
+            exp_types = ["any"]
+        if ("idarray" in exp_types) and ("array" not in exp_types):
+            exp_types.append("array")
+        return exp_types
+    def _value_type_name(self, value: any) -> str:
+        if isinstance(value, dict):
+            return value.get("type", "map")
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, int):
+            return "integer"
+        if isinstance(value, float):
+            return "float"
+        if isinstance(value, str):
+            return "string"
+        if isinstance(value, list):
+            return "array"
+        if value is None:
+            return "null"
+        return type(value).__name__
     def interpret(self) -> dict | None:
         self.ast_history.append(self.current_ast)
         try:
@@ -120,6 +151,12 @@ class Interpreter:
         args: dict = self.interpret()
         self.current_call = None
         self.current_call_target = None
+        if target.get("type") == "operator" and not call.get("operator_syntax", False):
+            self.eh.throw("notCallable", "operator values are not directly callable.")
+        if target.get("type") == "unit" and not call.get("unit_syntax", False):
+            self.eh.throw("notCallable", "unit values are not directly callable.")
+        if call.get("unit_syntax", False) and target.get("type") != "unit":
+            self.eh.throw("notCallable", f"postfix unit syntax requires a unit target, not {target.get('type')!r}.")
         if target["map"].get("call") and (target["map"]["call"]["type"] == "data"):
             signature = inspect.signature(target["map"]["call"]["source"])
             provided_arguments: int = len(call["args"]["map"])
@@ -138,33 +175,8 @@ class Interpreter:
                 except KeyError:
                     self.eh.throw("noMatchingParameter", f"'{target['name']}' does not have a parameter matching '{k}'")
 
-                annotation = parameter.annotation
-                if annotation is inspect.Parameter.empty:
-                    exp_types: list[str] = ["any"]
-                elif isinstance(annotation, str):
-                    exp_types = [t.strip() for t in annotation.split("|")]
-                else:
-                    exp_types = [str(annotation)]
-
-                if ("idarray" in exp_types) and ("array" not in exp_types):
-                    exp_types.append("array")
-
-                if isinstance(v, dict):
-                    value_type: str = v.get("type", "map")
-                elif isinstance(v, bool):
-                    value_type = "boolean"
-                elif isinstance(v, int):
-                    value_type = "integer"
-                elif isinstance(v, float):
-                    value_type = "float"
-                elif isinstance(v, str):
-                    value_type = "string"
-                elif isinstance(v, list):
-                    value_type = "array"
-                elif v is None:
-                    value_type = "null"
-                else:
-                    value_type = type(v).__name__
+                exp_types = self._expected_types_for_parameter(parameter)
+                value_type: str = self._value_type_name(v)
 
                 if value_type not in exp_types and "any" not in exp_types:
                     self.eh.throw("typeError", f"parameter '{k}' expects one of these types: [{' '.join(exp_types)}], not {value_type}.")
@@ -180,7 +192,7 @@ class Interpreter:
         if self.current_call_target and self.current_call and self.current_call.get("current_interp_arg") is not None:
             try:
                 parameter = inspect.signature(self.current_call_target["map"]["call"]["source"]).parameters[self.current_call["current_interp_arg"]]
-                accepted_types = [item.strip() for item in parameter.annotation.split("|")]
+                accepted_types = self._expected_types_for_parameter(parameter)
                 if "identifier" in accepted_types or "idarray" in accepted_types:
                     return self.current_ast
             except KeyError:
@@ -190,6 +202,11 @@ class Interpreter:
             return dotted_match
         match = self.findVariable(self.current_ast["value"])
         return match
+    def interpretOperator(self) -> dict:
+        match = self.findVariable(self.current_ast["value"], error=False)
+        if match is not None:
+            return match
+        return self.current_ast
     def interpretMap(self) -> dict:
         map: dict = self.current_ast
         result: dict = {}
@@ -221,8 +238,14 @@ class Interpreter:
             "source": self.perkeo.res.Builtins.integerCall,
             "span": self.current_ast["span"]
         }
+        self.current_ast["prio"] = 2
         return self.current_ast
     def interpretFloat(self) -> dict:
+        return self.current_ast
+    def interpretUnit(self) -> dict:
+        match = self.findVariable(self.current_ast["value"], error=False)
+        if match is not None:
+            return match
         return self.current_ast
     def interpretArray(self) -> dict:
         array: dict = self.current_ast
@@ -231,10 +254,11 @@ class Interpreter:
         if self.current_call_target and self.current_call and self.current_call.get("current_interp_arg") is not None:
             try:
                 parameter = inspect.signature(self.current_call_target["map"]["call"]["source"]).parameters[self.current_call["current_interp_arg"]]
-                accepted_types = [item.strip() for item in parameter.annotation.split("|")]
+                accepted_types = self._expected_types_for_parameter(parameter)
                 preserve_identifiers = "idarray" in accepted_types
             except KeyError:
-                self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
+                print(self.current_call_target)
+                self.eh.throw("noMatchingParameter", f"'{self.current_call_target.get('name', 'object of type ' + self.current_call_target.get('type'))}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
         for item in self.current_ast["items"]:
             if preserve_identifiers and item.get("type") == "identifier":
                 result.append(item)
@@ -258,3 +282,7 @@ class Interpreter:
         return self.current_ast
     def interpretNull(self) -> dict:
         return self.current_ast
+    def interpretNan(self) -> dict:
+        return self.current_ast
+    def interpretComment(self) -> dict:
+        return {"type": "null", "map": {}, "span": self.current_ast["span"]}
