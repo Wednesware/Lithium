@@ -1,4 +1,7 @@
 import pko.logic.merge
 import pko.io.merge
+import pko.lang.map
 
-print 4 / 0
+x :: 4 / 1
+
+print lang.is x type::integer type::float

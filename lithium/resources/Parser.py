@@ -452,6 +452,8 @@ class Parser:
                 self._add_comment(result, self._comment())
                 continue
             if self._looks_like_kwarg():
+                if self._parse_kwarg_into_trailing_call(result, stop=stop):
+                    continue
                 self._parse_kwarg_into(result, stop=stop)
                 continue
             if self._check("ARROW"):
@@ -474,6 +476,64 @@ class Parser:
             last = self._previous()
             result["span"] = self._span_between(start, last)
         return result
+
+    def _parse_kwarg_into_trailing_call(self, result: dict[str, any], stop: set[str]) -> bool:
+        positional_items = self._get_positional_items(result)
+        # If we already collapsed a trailing implicit call (e.g. `lang.is x type::integer`),
+        # keep attaching subsequent keyword arguments to that call.
+        if len(positional_items) == 1 and positional_items[0]["type"] == "call":
+            trailing_call = positional_items[0]
+            trailing_target = trailing_call.get("target", {})
+            target_value = str(trailing_target.get("value", ""))
+            if trailing_target.get("type") != "identifier" or "." not in target_value:
+                return False
+
+            key_token = self._advance()
+            self._consume("DOUBLE_COLON", "Expected '::' after map key")
+            if self._at_stop(stop) or not self._starts_value():
+                self.eh.throwWithSpan("expectedValue", "expected value after '::'", self._peek().span)
+
+            allow_implicit_call = self._check("LPAREN")
+            value = self.parse_expression(stop=stop, allow_implicit_call=allow_implicit_call)
+            self._add_map_item(trailing_call["args"], str(key_token.value), value)
+            trailing_call["span"] = self._merge_spans(trailing_call["span"], value["span"])
+            result["span"] = self._merge_spans(result["span"], trailing_call["span"])
+            return True
+
+        if len(positional_items) < 2:
+            return False
+
+        candidate_index = -1
+        for i in range(len(positional_items) - 2, -1, -1):
+            if positional_items[i]["type"] != "identifier":
+                continue
+            identifier_value = str(positional_items[i].get("value", ""))
+            if i > 0 or "." in identifier_value:
+                candidate_index = i
+                break
+
+        if candidate_index < 0:
+            return False
+
+        trailing_target = positional_items[candidate_index]
+        trailing_args = self._new_map(self._span_from_nodes(trailing_target, positional_items[-1]))
+        for item in positional_items[candidate_index + 1 :]:
+            self._add_positional(trailing_args, item)
+
+        key_token = self._advance()
+        self._consume("DOUBLE_COLON", "Expected '::' after map key")
+        if self._at_stop(stop) or not self._starts_value():
+            self.eh.throwWithSpan("expectedValue", "expected value after '::'", self._peek().span)
+
+        allow_implicit_call = self._check("LPAREN")
+        value = self.parse_expression(stop=stop, allow_implicit_call=allow_implicit_call)
+        self._add_map_item(trailing_args, str(key_token.value), value)
+
+        trailing_call = self._call(trailing_target, trailing_args)
+        combined_items = positional_items[:candidate_index] + [trailing_call]
+        self._set_positional_items(result, combined_items)
+        result["span"] = self._merge_spans(result["span"], trailing_call["span"])
+        return True
 
     def _parse_kwarg_into(self, result: dict[str, any], stop: set[str]) -> None:
         key_token = self._advance()
@@ -566,6 +626,31 @@ class Parser:
             )
             result["map"]["value"]["is_argument_pack"] = True
         result["span"] = self._merge_spans(result["span"], value["span"])
+
+    def _get_positional_items(self, result: dict[str, any]) -> list[dict[str, any]]:
+        value = result["map"].get("value")
+        if value is None:
+            return []
+        if value["type"] == "array" and value.get("is_argument_pack"):
+            return list(value["items"])
+        return [value]
+
+    def _set_positional_items(self, result: dict[str, any], items: list[dict[str, any]]) -> None:
+        map_obj = result["map"]
+        if not items:
+            map_obj.pop("value", None)
+            return
+        if len(items) == 1:
+            map_obj["value"] = items[0]
+            return
+
+        array_node = self._node(
+            "array",
+            self._span_from_nodes(items[0], items[-1]),
+            items=items,
+        )
+        array_node["is_argument_pack"] = True
+        map_obj["value"] = array_node
 
     def _add_map_item(self, result: dict[str, any], key: str, value: dict[str, any]) -> None:
         map = result["map"]

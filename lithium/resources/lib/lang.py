@@ -45,3 +45,15 @@ def _pko_ast(interpreter, target, value: "any") -> dict: # type: ignore
         "truthiness": lambda x: bool(x["map"]),
         "span": span,
     }
+    
+def _pko_is(interpreter, target, value: "any", type: "idarray|identifier") -> dict: # type: ignore
+    span = value["span"] if isinstance(value, dict) and "span" in value else interpreter.current_ast["span"]
+    is_true = value["type"] in ([t["value"] for t in type["items"]] if type["type"] == "array" else [type["value"]])
+    return {
+        "type": "boolean",
+        "value": is_true,
+        "map": {},
+        "usedalias": str(is_true).lower(),
+        "truthiness": lambda x: x["value"],
+        "span": span,
+    }
