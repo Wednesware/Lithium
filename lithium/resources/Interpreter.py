@@ -1,3 +1,4 @@
+import copy
 import inspect, os
 
 
@@ -143,6 +144,7 @@ class Interpreter:
             self.interpret()
     def interpretCall(self) -> dict:
         call = self.current_ast
+        raw_args = copy.deepcopy(call["args"])
         self.current_call = call
         self.current_ast = self.current_ast["target"]
         target = self.interpret()
@@ -184,7 +186,12 @@ class Interpreter:
                 self.eh.throw("tooManyArguments", f"too many arguments provided to {target['name']}. ({provided_arguments} prov. vs max of {expected_arguments} expected)")
             if provided_arguments < required_arguments:
                 self.eh.throw("tooFewArguments", f"too few arguments provided to {target['name']}. ({provided_arguments} prov. vs min of {required_arguments} required)")
-            return_value: dict | None = target["map"]["call"]["source"](self, target, **args["map"])
+            previous_raw_call_args = getattr(self, "current_raw_call_args", None)
+            self.current_raw_call_args = raw_args
+            try:
+                return_value: dict | None = target["map"]["call"]["source"](self, target, **args["map"])
+            finally:
+                self.current_raw_call_args = previous_raw_call_args
             return {"type": "null", "map": {}, "span": call["span"]} if return_value is None else return_value
         else:
             self.eh.throw("notCallable", f"object of type '{target['type']}' is not callable.")

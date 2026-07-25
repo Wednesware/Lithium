@@ -1,7 +1,7 @@
-import pko.logic.merge
-import pko.io.merge
-import pko.lang.map
+import pko.recur.all
+import pko.io.all
+import pko.lang.all
 
-x :: 4 / 1
+i::20
 
-print lang.is x type::integer type::float
+send (length 0..20)

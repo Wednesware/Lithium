@@ -45,7 +45,7 @@ def _pko_else(interpreter, target, value: "block") -> dict:  # type: ignore
     block = value.get("body", [])
     if not block:
         interpreter.eh.throw("tooFewArguments", "'else' expects a child block after '->'.")
-    return _run_block(interpreter, value)
+    return _run_block(interpreter, block)
 
 def _pko_elseif(interpreter, target, value: "array") -> dict:  # type: ignore
     if not hasattr(interpreter, "last_if") or interpreter.last_if is None:

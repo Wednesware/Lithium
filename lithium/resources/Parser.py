@@ -549,11 +549,13 @@ class Parser:
     def _parse_arrow_block(self) -> dict[str, any]:
         arrow = self._consume("ARROW", "Expected '->'")
 
-        if self._check("LBRACE"):
-            self._advance()
+        if self._check("LBRACE", "LPAREN"):
+            open_token = self._advance()
+            close_type = "RBRACE" if open_token.type == "LBRACE" else "RPAREN"
+            close_message = "Expected '}' after block" if close_type == "RBRACE" else "Expected ')' after block"
             body: list[dict[str, any]] = []
 
-            while not self._check("RBRACE", "EOF"):
+            while not self._check(close_type, "EOF"):
                 if self._match("NEWLINE", "SEMICOLON"):
                     continue
                 if self._check("COMMENT"):
@@ -561,10 +563,10 @@ class Parser:
                     if comment is not None:
                         body.append(comment)
                     continue
-                body.append(self.parse_line(stop={"RBRACE", "EOF"}))
+                body.append(self.parse_line(stop={close_type, "EOF"}))
                 self._consume_line_enders()
 
-            close_token = self._consume("RBRACE", "Expected '}' after block")
+            close_token = self._consume(close_type, close_message)
             return self._node("block", self._span_between(arrow, close_token), body=body)
 
         while self._match("NEWLINE"):

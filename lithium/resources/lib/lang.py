@@ -57,3 +57,20 @@ def _pko_is(interpreter, target, value: "any", type: "idarray|identifier") -> di
         "truthiness": lambda x: x["value"],
         "span": span,
     }
+    
+def _pko_length(interpreter, target, value: "array|string|map") -> dict: # type: ignore
+    span = value["span"] if isinstance(value, dict) and "span" in value else interpreter.current_ast["span"]
+    length = 0
+    if value["type"] == "array":
+        length = len(value.get("items", []))
+    elif value["type"] == "string":
+        length = len(value.get("value", ""))
+    elif value["type"] == "map":
+        length = len(value.get("map", {}))
+    return {
+        "type": "integer",
+        "value": length,
+        "map": {},
+        "truthiness": lambda x: x["value"] > 0,
+        "span": span,
+    }

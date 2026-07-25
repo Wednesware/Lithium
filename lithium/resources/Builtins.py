@@ -460,7 +460,7 @@ class Builtins:
                                 "span": single_value["span"]
                             })
                             continue
-                        elif import_name == "merge":
+                        elif import_name == "all":
                             for key, export_value in exports.items():
                                 interpreter.scopes[-1].set(key, export_value)
                             continue
@@ -486,7 +486,7 @@ class Builtins:
                                 "span": single_value["span"]
                             })
                             continue
-                        elif import_name == "merge":
+                        elif import_name == "all":
                             for key, export_value in exports.items():
                                 interpreter.scopes[-1].set(key, export_value)
                             continue
