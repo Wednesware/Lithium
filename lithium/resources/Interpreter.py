@@ -16,6 +16,8 @@ class Interpreter:
         builtins = {
             "import": self.perkeo.res.Builtins.getASTOf(self, "import", "import_")["import"],
             "export": self.perkeo.res.Builtins.getASTOf(self, "export", "export_")["export"],
+            "call": self.perkeo.res.Builtins.getASTOf(self, "call", "call")["call"],
+            "fn": self.perkeo.res.Builtins.getASTOf(self, "fn", "fn")["fn"],
             "true": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "true", "truthiness": lambda x: bool(x["value"])},
             "on": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "on", "truthiness": lambda x: bool(x["value"])},
             "enabled": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "enabled", "truthiness": lambda x: bool(x["value"])},
@@ -72,7 +74,7 @@ class Interpreter:
         if annotation is inspect.Parameter.empty:
             exp_types: list[str] = ["any"]
         elif isinstance(annotation, str):
-            exp_types = [item.strip() for item in annotation.split("|") if item.strip()]
+            exp_types = self._split_annotation_variants(annotation)
         else:
             exp_types = [str(annotation)]
 
@@ -81,6 +83,90 @@ class Interpreter:
         if ("idarray" in exp_types) and ("array" not in exp_types):
             exp_types.append("array")
         return exp_types
+
+    def _split_annotation_variants(self, annotation: str) -> list[str]:
+        variants: list[str] = []
+        current: list[str] = []
+        depth = 0
+
+        for char in annotation:
+            if char == "[":
+                depth += 1
+                current.append(char)
+                continue
+            if char == "]":
+                depth = max(0, depth - 1)
+                current.append(char)
+                continue
+            if char == "|" and depth == 0:
+                token = "".join(current).strip()
+                if token:
+                    variants.append(token)
+                current = []
+                continue
+            current.append(char)
+
+        token = "".join(current).strip()
+        if token:
+            variants.append(token)
+        return variants
+
+    def _parse_array_annotation_item_types(self, annotation: str) -> set[str] | None:
+        normalized = annotation.strip()
+        if not (normalized.startswith("array[") and normalized.endswith("]")):
+            return None
+
+        inner = normalized[6:-1].strip()
+        if not inner:
+            return set()
+
+        allowed: set[str] = set()
+        token: list[str] = []
+        for char in inner:
+            if char in {" ", "\t", "\n", ",", "|"}:
+                candidate = "".join(token).strip()
+                if candidate:
+                    allowed.add(candidate)
+                token = []
+                continue
+            token.append(char)
+
+        candidate = "".join(token).strip()
+        if candidate:
+            allowed.add(candidate)
+        return allowed
+
+    def _matches_expected_type(self, value: any, expected_type: str) -> bool:
+        if expected_type == "any":
+            return True
+
+        value_type = self._value_type_name(value)
+        if expected_type == "idarray":
+            if value_type != "array" or not isinstance(value, dict):
+                return False
+            return all(isinstance(item, dict) and item.get("type") == "identifier" for item in value.get("items", []))
+
+        array_item_types = self._parse_array_annotation_item_types(expected_type)
+        if array_item_types is not None:
+            if value_type != "array" or not isinstance(value, dict):
+                return False
+            if not array_item_types:
+                return True
+            for item in value.get("items", []):
+                if self._value_type_name(item) not in array_item_types:
+                    return False
+            return True
+
+        return value_type == expected_type
+
+    def _array_annotation_accepts_identifier_items(self, expected_types: list[str]) -> bool:
+        for expected_type in expected_types:
+            item_types = self._parse_array_annotation_item_types(expected_type)
+            if item_types is None:
+                continue
+            if "identifier" in item_types:
+                return True
+        return False
     def _value_type_name(self, value: any) -> str:
         if isinstance(value, dict):
             return value.get("type", "map")
@@ -162,11 +248,29 @@ class Interpreter:
         if target["map"].get("call") and (target["map"]["call"]["type"] == "data"):
             signature = inspect.signature(target["map"]["call"]["source"])
             provided_arguments: int = len(call["args"]["map"])
-            expected_arguments: int = target["map"]["call"]["source"].__code__.co_argcount - 2
+            parameters = list(signature.parameters.values())
+            runtime_parameters = parameters[2:]
+            accepts_var_keyword = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in runtime_parameters)
+            accepts_var_positional = any(parameter.kind == inspect.Parameter.VAR_POSITIONAL for parameter in runtime_parameters)
+            expected_arguments: int = sum(
+                1
+                for parameter in runtime_parameters
+                if parameter.kind in {
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                }
+            )
             required_arguments: int = sum(
-                p.default is inspect.Parameter.empty
-                for p in signature.parameters.values()
-            ) - 2
+                1
+                for parameter in runtime_parameters
+                if parameter.kind in {
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                }
+                and parameter.default is inspect.Parameter.empty
+            )
             for k, v in args["map"].items():
                 if v is None:
                     continue
@@ -175,14 +279,15 @@ class Interpreter:
                 try:
                     parameter = signature.parameters[k]
                 except KeyError:
+                    if accepts_var_keyword:
+                        continue
                     self.eh.throw("noMatchingParameter", f"'{target['name']}' does not have a parameter matching '{k}'")
 
                 exp_types = self._expected_types_for_parameter(parameter)
                 value_type: str = self._value_type_name(v)
-
-                if value_type not in exp_types and "any" not in exp_types:
+                if not any(self._matches_expected_type(v, expected_type) for expected_type in exp_types):
                     self.eh.throw("typeError", f"parameter '{k}' expects one of these types: [{' '.join(exp_types)}], not {value_type}.")
-            if provided_arguments > expected_arguments:
+            if not accepts_var_keyword and not accepts_var_positional and provided_arguments > expected_arguments:
                 self.eh.throw("tooManyArguments", f"too many arguments provided to {target['name']}. ({provided_arguments} prov. vs max of {expected_arguments} expected)")
             if provided_arguments < required_arguments:
                 self.eh.throw("tooFewArguments", f"too few arguments provided to {target['name']}. ({provided_arguments} prov. vs min of {required_arguments} required)")
@@ -197,12 +302,16 @@ class Interpreter:
             self.eh.throw("notCallable", f"object of type '{target['type']}' is not callable.")
     def interpretIdentifier(self) -> dict:
         if self.current_call_target and self.current_call and self.current_call.get("current_interp_arg") is not None:
+            signature = inspect.signature(self.current_call_target["map"]["call"]["source"])
+            accepts_var_keyword = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
             try:
-                parameter = inspect.signature(self.current_call_target["map"]["call"]["source"]).parameters[self.current_call["current_interp_arg"]]
+                parameter = signature.parameters[self.current_call["current_interp_arg"]]
                 accepted_types = self._expected_types_for_parameter(parameter)
                 if "identifier" in accepted_types or "idarray" in accepted_types:
                     return self.current_ast
             except KeyError:
+                if accepts_var_keyword:
+                    return self.current_ast
                 self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
         dotted_match = self._resolve_dotted_identifier(self.current_ast["value"])
         if dotted_match is not None:
@@ -259,13 +368,17 @@ class Interpreter:
         result: list = []
         preserve_identifiers = False
         if self.current_call_target and self.current_call and self.current_call.get("current_interp_arg") is not None:
+            signature = inspect.signature(self.current_call_target["map"]["call"]["source"])
+            accepts_var_keyword = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
             try:
-                parameter = inspect.signature(self.current_call_target["map"]["call"]["source"]).parameters[self.current_call["current_interp_arg"]]
+                parameter = signature.parameters[self.current_call["current_interp_arg"]]
                 accepted_types = self._expected_types_for_parameter(parameter)
-                preserve_identifiers = "idarray" in accepted_types
+                preserve_identifiers = "idarray" in accepted_types or self._array_annotation_accepts_identifier_items(accepted_types)
             except KeyError:
-                print(self.current_call_target)
-                self.eh.throw("noMatchingParameter", f"'{self.current_call_target.get('name', 'object of type ' + self.current_call_target.get('type'))}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
+                if accepts_var_keyword:
+                    preserve_identifiers = True
+                else:
+                    self.eh.throw("noMatchingParameter", f"'{self.current_call_target.get('name', 'object of type ' + self.current_call_target.get('type'))}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
         for item in self.current_ast["items"]:
             if preserve_identifiers and item.get("type") == "identifier":
                 result.append(item)
@@ -283,7 +396,7 @@ class Interpreter:
         group["value"] = evaluated
         return evaluated
     def interpretBlock(self) -> dict:
-        # Blocks are first-class values and are executed by control-flow builtins.
+        self.scopes.append(self.perkeo.res.Scope(self, "local", {}))
         return self.current_ast
     def interpretData(self) -> dict:
         return self.current_ast

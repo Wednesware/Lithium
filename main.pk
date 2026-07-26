@@ -1,7 +1,9 @@
-import pko.recur.all
-import pko.io.all
-import pko.lang.all
+import sheet::pko.std
 
-i::20
+class Person -> (
+    name :: "Kassidy"
+    io.print name
+    io.print (call scopes)
+)
 
-send (length 0..20)
+io.print (call scopes)

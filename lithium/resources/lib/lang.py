@@ -74,3 +74,13 @@ def _pko_length(interpreter, target, value: "array|string|map") -> dict: # type:
         "truthiness": lambda x: x["value"] > 0,
         "span": span,
     }
+    
+def _pko_scopes(interpreter, target) -> dict: # type: ignore
+    span = interpreter.current_ast["span"]
+    return {
+        "type": "array",
+        "items": [{"type": "data", "source": scope, "map": {}, "span": span, "stringify": lambda x: f"<scope data at {hex(id(scope))}>"} for i, scope in enumerate(interpreter.scopes, start=1)],
+        "map": {},
+        "truthiness": lambda x: len(x.get("items", [])) > 0,
+        "span": span,
+    }

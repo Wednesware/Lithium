@@ -144,7 +144,9 @@ class Parser:
         stop = set(stop or ()) | self.LINE_ENDERS
         start = self._peek()
 
-        if self._looks_like_kwarg():
+        if self._looks_like_fn_declaration(stop):
+            value = self._parse_fn_declaration_call(stop)
+        elif self._looks_like_kwarg():
             value = self._parse_argument_map(stop)
         else:
             value = self.parse_expression(stop=stop, allow_implicit_call=True)
@@ -162,6 +164,70 @@ class Parser:
             )
 
         return self._node("line", self._span_from_nodes(start, value), value=value)
+
+    def _looks_like_fn_declaration(self, stop: set[str]) -> bool:
+        if not self._check("IDENTIFIER"):
+            return False
+        if self._peek().value != "fn":
+            return False
+        if self._peek(1).type != "IDENTIFIER":
+            return False
+
+        offset = 2
+        while True:
+            token = self._peek(offset)
+            if token.type in stop:
+                return False
+            if token.type == "ARROW":
+                return True
+            if token.type == "EOF":
+                return False
+            offset += 1
+
+    def _parse_fn_declaration_call(self, stop: set[str]) -> dict[str, any]:
+        fn_token = self._consume("IDENTIFIER", "Expected 'fn'")
+        if fn_token.value != "fn":
+            self.eh.throwWithSpan("illegalSyntax", "expected 'fn'", fn_token.span)
+
+        name_token = self._consume("IDENTIFIER", "Expected function name after 'fn'")
+        name_node = self._node("identifier", name_token.span, value=name_token.value)
+        params_map = self._new_map(name_token.span)
+
+        while not self._at_stop(stop) and not self._check("ARROW"):
+            if self._check("COMMENT"):
+                self._comment()
+                continue
+
+            param_token = self._consume("IDENTIFIER", "Expected parameter name before '::'")
+            self._consume("DOUBLE_COLON", "Expected '::' after parameter name")
+
+            if self._at_stop(stop) or not self._starts_value():
+                self.eh.throwWithSpan("expectedValue", "expected type identifier after '::'", self._peek().span)
+
+            type_node = self.parse_expression(stop=stop | {"ARROW"}, allow_implicit_call=False)
+            if type_node["type"] not in {"identifier", "string"}:
+                self.eh.throwWithSpan("expectedIdentifier", "parameter type must be an identifier or string", type_node["span"])
+
+            if str(param_token.value) in params_map["map"]:
+                self.eh.throwWithSpan("duplicateParameter", f"parameter '{param_token.value}' is already declared", param_token.span)
+            params_map["map"][str(param_token.value)] = type_node
+            params_map["span"] = self._merge_spans(params_map["span"], type_node["span"])
+
+        if not self._check("ARROW"):
+            self.eh.throwWithSpan("expectedArrow", "expected '->' after function signature", self._peek().span)
+
+        body = self._parse_arrow_block()
+        args = self._new_map(self._span_from_node_list(name_node, body))
+        args["map"]["name"] = name_node
+        args["map"]["params"] = params_map
+        args["map"]["body"] = body
+        args["span"] = self._span_from_node_list(name_node, body)
+
+        return self._call(
+            self._node("identifier", fn_token.span, value="fn"),
+            args,
+            end_token=body,
+        )
 
     def parse_expression(
         self,

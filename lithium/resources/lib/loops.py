@@ -72,9 +72,5 @@ def _pko_while(interpreter, target, value: "array") -> dict:  # type: ignore
 
 
 def _pko_for(interpreter, iterable, callback):
-    if not isinstance(iterable, list):
-        from lithium.resources.errors.LithiumRuntimeError import LithiumRuntimeError
-        raise LithiumRuntimeError(f"for: iterable must be an array, got {type(iterable).__name__}")
-    
     for item in iterable:
         interpreter.call_function(callback, [item])

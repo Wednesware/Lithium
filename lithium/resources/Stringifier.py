@@ -79,7 +79,7 @@ class Stringifier:
     def stringifyFunction(self, ast: dict) -> str:
         return f"<function {ast['name']}>"
     def stringifyData(self, ast: dict) -> str:
-        return str(ast["source"])
+        return f"<data at {hex(id(ast['source']))}>"
     def stringifyNull(self, ast: dict) -> str:
         return "null"
     def stringifyNan(self, ast: dict) -> str:
