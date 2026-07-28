@@ -19,8 +19,7 @@ class Parser:
     DEFAULT_INFIX_PRIORITIES = {
         "or": 1,
         "and": 1,
-        "|": 1,
-        "&": 1,
+        "at": 2,
         "=": 2,
         "==": 2,
         "!=": 2,
@@ -59,6 +58,9 @@ class Parser:
         self.last_ast: dict[str, any] | None = None
         self.infix_priorities = dict(self.DEFAULT_INFIX_PRIORITIES)
         self._load_runtime_priorities()
+        self._word_operators = {
+            symbol for symbol in self.infix_priorities if isinstance(symbol, str) and symbol.isidentifier()
+        }
         self.eh = self.perkeo.res.ErrorHandler(self)
 
     def parse(self) -> dict[str, any]:
@@ -233,6 +235,7 @@ class Parser:
         self,
         stop: set[str] | None = None,
         allow_implicit_call: bool = False,
+        allow_arrow: bool = True,
     ) -> dict[str, any]:
         stop = set(stop or ())
         value = self._parse_comparison(stop)
@@ -245,7 +248,7 @@ class Parser:
             args = self._parse_argument_map(stop)
             value = self._call(value, args)
 
-        while not self._at_stop(stop) and self._check("ARROW"):
+        while allow_arrow and not self._at_stop(stop) and self._check("ARROW"):
             block = self._parse_arrow_block()
             if value["type"] == "identifier":
                 args = self._new_map(self._span_from_node_list(value, block))
@@ -362,6 +365,19 @@ class Parser:
                 return None
             return token, precedence, True
 
+        # Reserved word operators (or/and/at/to/...) always bind as infix
+        # operators, regardless of the left operand's node type. This keeps
+        # `true or false`, `a at 0`, and `400cm to m` working the same way
+        # symbolic operators do.
+        if self._check("IDENTIFIER") and str(self._peek().value) in self._word_operators:
+            token = self._peek()
+            precedence = self._infix_priority_for_symbol(str(token.value))
+            if precedence is None:
+                return None
+            if not self._starts_value_at_offset(1):
+                return None
+            return token, precedence, True
+
         if current_target["type"] != "identifier" and self._is_infix_identifier_call():
             token = self._peek()
             precedence = self._infix_priority_for_symbol(str(token.value), default=0)
@@ -379,7 +395,10 @@ class Parser:
             return False
         if self._peek(1).type == "DOUBLE_COLON":
             return False
-        if self._starts_value_at_offset(1):
+        # A following word operator (e.g. `to` in `400cm to m`) should not
+        # disqualify postfix unit parsing: the operator applies to the
+        # resulting quantity, it isn't a further argument for the unit.
+        if self._starts_value_at_offset(1) and str(self._peek(1).value) not in self._word_operators:
             return False
         token = self._peek()
         return current_value["span"]["end"] == token.span["start"]
@@ -560,7 +579,7 @@ class Parser:
                 self.eh.throwWithSpan("expectedValue", "expected value after '::'", self._peek().span)
 
             allow_implicit_call = self._check("LPAREN")
-            value = self.parse_expression(stop=stop, allow_implicit_call=allow_implicit_call)
+            value = self.parse_expression(stop=stop, allow_implicit_call=allow_implicit_call, allow_arrow=allow_implicit_call)
             self._add_map_item(trailing_call["args"], str(key_token.value), value)
             trailing_call["span"] = self._merge_spans(trailing_call["span"], value["span"])
             result["span"] = self._merge_spans(result["span"], trailing_call["span"])
@@ -592,7 +611,7 @@ class Parser:
             self.eh.throwWithSpan("expectedValue", "expected value after '::'", self._peek().span)
 
         allow_implicit_call = self._check("LPAREN")
-        value = self.parse_expression(stop=stop, allow_implicit_call=allow_implicit_call)
+        value = self.parse_expression(stop=stop, allow_implicit_call=allow_implicit_call, allow_arrow=allow_implicit_call)
         self._add_map_item(trailing_args, str(key_token.value), value)
 
         trailing_call = self._call(trailing_target, trailing_args)
@@ -608,8 +627,12 @@ class Parser:
             self.eh.throwWithSpan("expectedValue", "expected value after '::'", self._peek().span)
         # Keep subsequent keyword arguments at this call level.
         # Parenthesized values can still contain intentional implicit calls.
+        # A trailing `->` block belongs to the outer call (e.g. the class
+        # body in `class Dog inherits::Animal -> {...}`), not to a bare
+        # identifier kwarg value, so arrow-absorption is disabled unless
+        # the value is parenthesized.
         allow_implicit_call = self._check("LPAREN")
-        value = self.parse_expression(stop=stop, allow_implicit_call=allow_implicit_call)
+        value = self.parse_expression(stop=stop, allow_implicit_call=allow_implicit_call, allow_arrow=allow_implicit_call)
         self._add_map_item(result, str(key_token.value), value)
 
     def _parse_arrow_block(self) -> dict[str, any]:

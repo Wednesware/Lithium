@@ -3,6 +3,7 @@ import importlib
 import importlib.util
 import os
 import sys
+from decimal import Decimal
 
 
 class Builtins:
@@ -20,16 +21,20 @@ class Builtins:
         ">=": "gte",
         "<": "lt",
         "<=": "lte",
-        "|": "logicor",
-        "&": "logicand",
+        "or": "logicor",
+        "and": "logicand",
+        "at": "at",
+        "to": "convertTo",
         "..": "range",
         "..=": "rangeincl",
         ":": "span"
     }
 
     OPERATOR_PRIORITIES = {
-        "|": 1,
-        "&": 1,
+        "or": 1,
+        "and": 1,
+        "at": 2,
+        "to": 2,
         "=": 2,
         "==": 2,
         "!=": 2,
@@ -52,6 +57,25 @@ class Builtins:
     FUNCTION_PRIORITIES = {
         "or": 1,
         "and": 1,
+        "at": 2,
+        "to": 2,
+    }
+    UNIT_DEFS: dict[str, tuple[str, "Decimal | None"]] = {
+        "mm": ("length", Decimal("0.001")),
+        "cm": ("length", Decimal("0.01")),
+        "dm": ("length", Decimal("0.1")),
+        "m": ("length", Decimal("1")),
+        "km": ("length", Decimal("1000")),
+        "mg": ("mass", Decimal("0.001")),
+        "g": ("mass", Decimal("1")),
+        "kg": ("mass", Decimal("1000")),
+        "ms": ("time", Decimal("0.001")),
+        "s": ("time", Decimal("1")),
+        "min": ("time", Decimal("60")),
+        "h": ("time", Decimal("3600")),
+        "C": ("temperature", None),
+        "F": ("temperature", None),
+        "K": ("temperature", None),
     }
 
     @staticmethod
@@ -80,16 +104,14 @@ class Builtins:
                     "type": "data",
                     "source": resolved_source,
                     "span": interpreter.perkeo.res.Token.emptySpan(),
-                    "stringify": lambda x: f"<function data at {hex(id(resolved_source))}>"
+                    "stringify": lambda x: f"<call data at {hex(id(resolved_source))}>"
                 }
             },
             "span": interpreter.perkeo.res.Token.emptySpan()
         }
         if resolved_prio is not None:
             function_node["prio"] = resolved_prio
-        return {
-            name: function_node
-        }
+        return function_node
 
     @staticmethod
     def getOperatorASTOf(interpreter, name: str, source_name: str | None = None, source: callable | None = None, prio: int | None = None) -> dict:
@@ -107,16 +129,14 @@ class Builtins:
                     "type": "data",
                     "source": resolved_source,
                     "span": interpreter.perkeo.res.Token.emptySpan(),
-                    "stringify": lambda x: f"<function data at {hex(id(resolved_source))}>"
+                    "stringify": lambda x: f"<call data at {hex(id(resolved_source))}>"
                 }
             },
             "span": interpreter.perkeo.res.Token.emptySpan()
         }
         if resolved_prio is not None:
             operator_node["prio"] = resolved_prio
-        return {
-            name: operator_node
-        }
+        return operator_node
 
     @staticmethod
     def getUnitASTOf(interpreter, name: str, source_name: str | None = None, source: callable | None = None, prio: int | None = None) -> dict:
@@ -134,14 +154,14 @@ class Builtins:
                     "type": "data",
                     "source": resolved_source,
                     "span": interpreter.perkeo.res.Token.emptySpan(),
-                    "stringify": lambda x: f"<function data at {hex(id(resolved_source))}>"
+                    "stringify": lambda x: f"<call data at {hex(id(resolved_source))}>"
                 }
             },
             "span": interpreter.perkeo.res.Token.emptySpan()
         }
         if resolved_prio is not None:
             unit_node["prio"] = resolved_prio
-        return {name: unit_node}
+        return unit_node
 
     @staticmethod
     def _asIdentifierNodes(value: dict | None) -> list[dict]:
@@ -169,8 +189,10 @@ class Builtins:
             return {"type": "boolean", "value": value, "map": {}, "usedalias": str(value).lower(), "truthiness": lambda x: bool(x["value"]), "span": dict(span)}
         if isinstance(value, int):
             return {"type": "integer", "value": value, "map": {}, "truthiness": lambda x: bool(x["value"]), "span": dict(span)}
-        if isinstance(value, float):
+        if isinstance(value, Decimal):
             return {"type": "float", "value": value, "map": {}, "truthiness": lambda x: bool(x["value"]), "span": dict(span)}
+        if isinstance(value, float):
+            return {"type": "float", "value": Decimal(str(value)), "map": {}, "truthiness": lambda x: bool(x["value"]), "span": dict(span)}
         if isinstance(value, str):
             return {"type": "string", "value": value, "map": {}, "truthiness": lambda x: bool(x["value"]), "span": dict(span)}
         if value is None:
@@ -260,21 +282,27 @@ class Builtins:
 
             export_name = key.removeprefix("_pko_")
             if callable(value):
-                exports[export_name] = Builtins.getASTOf(interpreter, export_name, source=value)[export_name]
+                exports[export_name] = Builtins.getASTOf(interpreter, export_name, source=value)
             else:
-                exports[export_name] = Builtins._node_from_python_value(value, span, interpreter)
+                exports[export_name] = Builtins._nodeFromPythonValue(value, span, interpreter)
         return exports
 
     @staticmethod
-    def _asNumber(interpreter, node: dict) -> int | float:
+    def _asNumber(interpreter, node: dict) -> "int | Decimal":
         if node.get("type") not in {"integer", "float"}:
             interpreter.eh.throw("expectedNumber", f"expected numeric literal, got {node.get('type')!r}")
         return node["value"]
 
     @staticmethod
-    def _wrapNumber(value: int | float, span: dict) -> dict:
-        if isinstance(value, float):
+    def _asDecimal(value: "int | float | Decimal") -> Decimal:
+        return value if isinstance(value, Decimal) else Decimal(str(value))
+
+    @staticmethod
+    def _wrapNumber(value: "int | float | Decimal", span: dict) -> dict:
+        if isinstance(value, Decimal):
             return {"type": "float", "value": value, "map": {}, "span": dict(span), "truthiness": lambda x: bool(x["value"])}
+        if isinstance(value, float):
+            return {"type": "float", "value": Decimal(str(value)), "map": {}, "span": dict(span), "truthiness": lambda x: bool(x["value"])}
         return {"type": "integer", "value": value, "map": {}, "span": dict(span), "truthiness": lambda x: bool(x["value"])}
 
     @staticmethod
@@ -377,7 +405,8 @@ class Builtins:
         if not right_value:
             interpreter.eh.throw("divisionByZero", "division by zero is not allowed, returning nan.", warning=True)
             return {"type": "nan", "map": {}, "span": value["span"], "truthiness": lambda x: False}
-        return Builtins._wrapNumber(left_value / right_value, value["span"])
+        result = Builtins._asDecimal(left_value) / Builtins._asDecimal(right_value)
+        return Builtins._wrapNumber(result, value["span"])
 
     @staticmethod
     def mod(interpreter, target, value: "array") -> dict: # type: ignore
@@ -398,7 +427,8 @@ class Builtins:
         left, right = Builtins._binaryItems(interpreter, value)
         left_value = Builtins._asNumber(interpreter, left)
         right_value = Builtins._asNumber(interpreter, right)
-        return Builtins._wrapNumber(left_value / 100 * right_value, value["span"])
+        result = Builtins._asDecimal(left_value) / Decimal(100) * Builtins._asDecimal(right_value)
+        return Builtins._wrapNumber(result, value["span"])
 
     @staticmethod
     def eq(interpreter, target, value: "array") -> dict: # type: ignore
@@ -443,14 +473,41 @@ class Builtins:
         return Builtins._wrapBoolean(left_value <= right_value, value["span"])
     
     @staticmethod
+    def _isTruthy(node: dict) -> bool:
+        if not isinstance(node, dict):
+            return bool(node)
+        predicate = node.get("truthiness")
+        if callable(predicate):
+            return bool(predicate(node))
+        if "value" in node:
+            return bool(node["value"])
+        if "items" in node:
+            return bool(node["items"])
+        if "map" in node:
+            return bool(node["map"])
+        return True
+
+    @staticmethod
     def logicor(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binaryItems(interpreter, value)
-        return Builtins._wrapNumber(left["value"] if left["truthiness"](left) else right["value"], value["span"])
+        return left if Builtins._isTruthy(left) else right
     
     @staticmethod
     def logicand(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binaryItems(interpreter, value)
-        return Builtins._wrapNumber(left["value"] if not left["truthiness"](left) else right["value"], value["span"])
+        return left if not Builtins._isTruthy(left) else right
+    
+    @staticmethod
+    def at(interpreter, target, value: "array") -> dict: # type: ignore
+        left, right = Builtins._binaryItems(interpreter, value)
+        if left.get("type") != "array":
+            interpreter.eh.throw("expectedArray", f"expected array for 'at' operator, got {left.get('type')!r}")
+        index = Builtins._asNumber(interpreter, right)
+        items = left.get("items", [])
+        if not isinstance(index, int) or index < 0 or index >= len(items):
+            interpreter.eh.throw("indexOutOfBounds", f"index {index} is out of bounds for array of length {len(items)}")
+        return items[index]
+        
     
     @staticmethod
     def range(interpreter, target, value: "array") -> dict: # type: ignore
@@ -507,6 +564,98 @@ class Builtins:
             "stringify": lambda x: f"{x['map']['start']['value']}:{x['map']['end']['value']}",
             "span": value["span"],
         }
+
+    @staticmethod
+    def _unitDimension(unit_name: str) -> str | None:
+        info = Builtins.UNIT_DEFS.get(unit_name)
+        return info[0] if info else None
+
+    @staticmethod
+    def _toBaseUnit(dimension: str, unit_name: str, value: Decimal) -> Decimal:
+        if dimension == "temperature":
+            if unit_name == "C":
+                return value
+            if unit_name == "F":
+                return (value - 32) * Decimal(5) / Decimal(9)
+            if unit_name == "K":
+                return value - Decimal("273.15")
+        factor = Builtins.UNIT_DEFS[unit_name][1]
+        return value * factor
+
+    @staticmethod
+    def _fromBaseUnit(dimension: str, unit_name: str, base_value: Decimal) -> Decimal:
+        if dimension == "temperature":
+            if unit_name == "C":
+                return base_value
+            if unit_name == "F":
+                return base_value * Decimal(9) / Decimal(5) + 32
+            if unit_name == "K":
+                return base_value + Decimal("273.15")
+        factor = Builtins.UNIT_DEFS[unit_name][1]
+        return base_value / factor
+
+    @staticmethod
+    def _makeQuantity(value: "int | Decimal", unit_name: str, span: dict) -> dict:
+        return {
+            "type": "quantity",
+            "value": value,
+            "unit": unit_name,
+            "map": {},
+            "truthiness": lambda x: bool(x["value"]),
+            "stringify": lambda x: f"{x['value']}{x['unit']}",
+            "span": dict(span),
+        }
+
+    @staticmethod
+    def _normalizeQuantityValue(value: Decimal) -> "int | Decimal":
+        normalized = value.normalize()
+        if normalized == normalized.to_integral_value():
+            return int(normalized.to_integral_value())
+        _, _, exponent = normalized.as_tuple()
+        if exponent > 0:
+            normalized = normalized.quantize(Decimal(1))
+        return normalized
+
+    @staticmethod
+    def unitCall(interpreter, target, value: "integer|float") -> dict: # type: ignore
+        unit_name = target["value"]
+        if unit_name not in Builtins.UNIT_DEFS:
+            interpreter.eh.throw("unknownUnit", f"unknown unit '{unit_name}'")
+        return Builtins._makeQuantity(value["value"], unit_name, value["span"])
+
+    @staticmethod
+    def convertTo(interpreter, target, value: "array") -> dict: # type: ignore
+        left, right = Builtins._binaryItems(interpreter, value)
+        if left.get("type") != "quantity":
+            interpreter.eh.throw("typeError", f"'to' expects a quantity (e.g. 400cm) on the left-hand side, got {left.get('type')!r}")
+        if right.get("type") == "unit":
+            target_unit = right["value"]
+        elif right.get("type") == "quantity":
+            target_unit = right["unit"]
+        else:
+            interpreter.eh.throw("typeError", f"'to' expects a unit on the right-hand side, got {right.get('type')!r}")
+
+        source_unit = left["unit"]
+        source_dim = Builtins._unitDimension(source_unit)
+        target_dim = Builtins._unitDimension(target_unit)
+        if source_dim is None or target_dim is None:
+            interpreter.eh.throw("unknownUnit", f"unknown unit in conversion: '{source_unit}' to '{target_unit}'")
+        if source_dim != target_dim:
+            interpreter.eh.throw("incompatibleUnits", f"cannot convert '{source_unit}' ({source_dim}) to '{target_unit}' ({target_dim})")
+
+        source_value = Builtins._asDecimal(left["value"])
+        base_value = Builtins._toBaseUnit(source_dim, source_unit, source_value)
+        converted_value = Builtins._fromBaseUnit(target_dim, target_unit, base_value)
+        return Builtins._makeQuantity(Builtins._normalizeQuantityValue(converted_value), target_unit, value["span"])
+
+
+    @staticmethod
+    def _classParents(inherits) -> list:
+        if inherits is None:
+            return []
+        if isinstance(inherits, dict) and inherits.get("type") == "array":
+            return inherits.get("items", [])
+        return [inherits]
 
     @staticmethod
     def _declaredTypeName(type_ast: dict | None) -> str:
@@ -574,7 +723,7 @@ class Builtins:
                 interpreter.scopes.pop(0)
                 interpreter.current_ast = previous_ast
 
-        fn_ast = Builtins.getASTOf(interpreter, function_name, source=runtime_fn)[function_name]
+        fn_ast = Builtins.getASTOf(interpreter, function_name, source=runtime_fn)
         fn_ast["span"] = name["span"]
         interpreter.scopes[-1].set(function_name, fn_ast)
         return fn_ast

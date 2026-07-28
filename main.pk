@@ -1,9 +1,5 @@
 import sheet::pko.std
 
-class Person -> (
-    name :: "Kassidy"
-    io.print name
-    io.print (call scopes)
-)
+print (["a", "b", "c"] at 3)
 
-io.print (call scopes)
+// TODO: fix the array indexing

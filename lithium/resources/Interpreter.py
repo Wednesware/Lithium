@@ -1,5 +1,6 @@
 import copy
 import inspect, os
+from decimal import Decimal
 
 
 class Interpreter:
@@ -9,15 +10,16 @@ class Interpreter:
         self.current_call: dict | None = None
         self.current_call_target: dict | None = None
         self.ast_history: list[dict] = []
+        self._suppress_base_level: bool = False
         self.eh = self.perkeo.res.ErrorHandler(self)
         self.stringifier = self.perkeo.res.Stringifier(self)
         self.outputs: list[str] = ["terminal"]
         self.posts: list[str] = []
         builtins = {
-            "import": self.perkeo.res.Builtins.getASTOf(self, "import", "import_")["import"],
-            "export": self.perkeo.res.Builtins.getASTOf(self, "export", "export_")["export"],
-            "call": self.perkeo.res.Builtins.getASTOf(self, "call", "call")["call"],
-            "fn": self.perkeo.res.Builtins.getASTOf(self, "fn", "fn")["fn"],
+            "import": self.perkeo.res.Builtins.getASTOf(self, "import", "import_"),
+            "export": self.perkeo.res.Builtins.getASTOf(self, "export", "export_"),
+            "call": self.perkeo.res.Builtins.getASTOf(self, "call"),
+            "fn": self.perkeo.res.Builtins.getASTOf(self, "fn"),
             "true": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "true", "truthiness": lambda x: bool(x["value"])},
             "on": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "on", "truthiness": lambda x: bool(x["value"])},
             "enabled": {"type": "boolean", "value": True, "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}, "usedalias": "enabled", "truthiness": lambda x: bool(x["value"])},
@@ -30,12 +32,14 @@ class Interpreter:
             "nan": {"type": "nan", "map": {}, "span": {"line": 0, "column": 0, "end_column": 0}}
         }
         for operator_name, source_name in self.perkeo.res.Builtins.OPERATOR_BUILTINS.items():
-            builtins.update(self.perkeo.res.Builtins.getOperatorASTOf(self, operator_name, source_name))
+            builtins[operator_name] = self.perkeo.res.Builtins.getOperatorASTOf(self, operator_name, source_name)
+        for unit_name in self.perkeo.res.Builtins.UNIT_DEFS:
+            builtins[unit_name] = self.perkeo.res.Builtins.getUnitASTOf(self, unit_name, source=self.perkeo.res.Builtins.unitCall)
         self.scopes: list = [
             self.perkeo.res.Scope(self, "global", builtins)
         ]
     def _isBaseLevel(self) -> bool:
-        return self.ast_history[-2]["type"] == "line"
+        return not self._suppress_base_level and self.ast_history[-2]["type"] == "line"
     def runCode(self) -> None:
         self.current_ast = self.perkeo.full_ast
         self.interpret()
@@ -47,6 +51,42 @@ class Interpreter:
                 return scope.get(ident)
         if error:
             self.eh.throw("scopeError", f"identifier '{ident}' is not associated with a value in any scope.")
+    def _instanceScopeForCallTarget(self, target_ast: dict):
+        # Methods are stored as plain function values inside a class/instance
+        # map and don't carry an implicit "self" binding. When a call target
+        # is a dotted identifier (e.g. `fido.speak`), expose the owning
+        # instance/class's fields as an extra scope for the duration of the
+        # call so bare identifiers in the method body (e.g. `sound`) resolve
+        # to the instance's own fields via the existing dynamic-scoping rules.
+        if not isinstance(target_ast, dict) or target_ast.get("type") != "identifier":
+            return None
+        ident = str(target_ast.get("value", ""))
+        if "." not in ident:
+            return None
+        parts = ident.split(".")
+        owner = self.findVariable(parts[0], error=False)
+        for part in parts[1:-1]:
+            if not isinstance(owner, dict):
+                return None
+            owner = owner.get("map", {}).get(part)
+        if not isinstance(owner, dict) or not isinstance(owner.get("map"), dict):
+            return None
+        return self.perkeo.res.Scope(self, "instance", owner["map"])
+    def _assignDottedIdentifier(self, ident: str, value: dict) -> None:
+        parts = ident.split(".")
+        owner = self.findVariable(parts[0], error=False)
+        if owner is None:
+            self.eh.throw("scopeError", f"identifier '{parts[0]}' is not associated with a value in any scope.")
+        for part in parts[1:-1]:
+            if not isinstance(owner, dict):
+                self.eh.throw("scopeError", f"identifier '{ident}' cannot access member '{part}' on non-object value.")
+            owner_map = owner.get("map")
+            if not isinstance(owner_map, dict) or part not in owner_map:
+                self.eh.throw("scopeError", f"identifier '{ident}' has no member '{part}'.")
+            owner = owner_map[part]
+        if not isinstance(owner, dict) or not isinstance(owner.get("map"), dict):
+            self.eh.throw("scopeError", f"identifier '{ident}' cannot assign a member on a non-object value.")
+        owner["map"][parts[-1]] = value
     def _resolve_dotted_identifier(self, ident: str) -> dict | None:
         if "." not in ident:
             return None
@@ -174,7 +214,7 @@ class Interpreter:
             return "boolean"
         if isinstance(value, int):
             return "integer"
-        if isinstance(value, float):
+        if isinstance(value, (float, Decimal)):
             return "float"
         if isinstance(value, str):
             return "string"
@@ -195,17 +235,27 @@ class Interpreter:
             print(f"  {interpret_function.__name__}()")
         result: dict | None = interpret_function()
         if isinstance(result, dict) and result.get("map") and result.get("type") != "map":
-            for k, v in result["map"].items():
-                if isinstance(v, dict) and v.get("type"):
-                    self.current_ast = v
-                    result["map"][k] = self.interpret()
+            # This recursion re-runs interpret() for each nested value purely to
+            # wire up lazy call metadata (e.g. interpretInteger's integerCall).
+            # It isn't itself a bare top-level statement, so make sure nested
+            # values (e.g. a class/instance's string fields) don't trigger
+            # interpretString's base-level auto-print side effect.
+            previous_suppress = self._suppress_base_level
+            self._suppress_base_level = True
+            try:
+                for k, v in result["map"].items():
+                    if isinstance(v, dict) and v.get("type"):
+                        self.current_ast = v
+                        result["map"][k] = self.interpret()
+            finally:
+                self._suppress_base_level = previous_suppress
         self.ast_history.pop()
         return result
     def interpretScript(self) -> None:
         for body_item in self.current_ast["body"]:
             self.current_ast = body_item
             self.interpret()
-    def interpretLine(self) -> None:
+    def interpretLine(self) -> dict | None:
         line_value = self.current_ast["value"]
         self.current_ast = line_value
         result = self.interpret()
@@ -227,7 +277,8 @@ class Interpreter:
                 "current_interp_arg": None,
                 "span": line_value["span"],
             }
-            self.interpret()
+            result = self.interpret()
+        return result
     def interpretCall(self) -> dict:
         call = self.current_ast
         raw_args = copy.deepcopy(call["args"])
@@ -293,26 +344,32 @@ class Interpreter:
                 self.eh.throw("tooFewArguments", f"too few arguments provided to {target['name']}. ({provided_arguments} prov. vs min of {required_arguments} required)")
             previous_raw_call_args = getattr(self, "current_raw_call_args", None)
             self.current_raw_call_args = raw_args
+            instance_scope = self._instanceScopeForCallTarget(call["target"])
+            if instance_scope is not None:
+                self.scopes.insert(0, instance_scope)
             try:
                 return_value: dict | None = target["map"]["call"]["source"](self, target, **args["map"])
             finally:
+                if instance_scope is not None:
+                    self.scopes.pop(0)
                 self.current_raw_call_args = previous_raw_call_args
             return {"type": "null", "map": {}, "span": call["span"]} if return_value is None else return_value
         else:
             self.eh.throw("notCallable", f"object of type '{target['type']}' is not callable.")
     def interpretIdentifier(self) -> dict:
         if self.current_call_target and self.current_call and self.current_call.get("current_interp_arg") is not None:
-            signature = inspect.signature(self.current_call_target["map"]["call"]["source"])
-            accepts_var_keyword = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
-            try:
-                parameter = signature.parameters[self.current_call["current_interp_arg"]]
-                accepted_types = self._expected_types_for_parameter(parameter)
-                if "identifier" in accepted_types or "idarray" in accepted_types:
-                    return self.current_ast
-            except KeyError:
-                if accepts_var_keyword:
-                    return self.current_ast
-                self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
+            if self.current_call_target["map"].get("call"):
+                signature = inspect.signature(self.current_call_target["map"]["call"]["source"])
+                accepts_var_keyword = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
+                try:
+                    parameter = signature.parameters[self.current_call["current_interp_arg"]]
+                    accepted_types = self._expected_types_for_parameter(parameter)
+                    if "identifier" in accepted_types or "idarray" in accepted_types:
+                        return self.current_ast
+                except KeyError:
+                    if accepts_var_keyword:
+                        return self.current_ast
+                    self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
         dotted_match = self._resolve_dotted_identifier(self.current_ast["value"])
         if dotted_match is not None:
             return dotted_match
@@ -335,7 +392,10 @@ class Interpreter:
         if self._isBaseLevel():
             if map["map"] and "value" not in map["map"]:
                 for k, v in map["map"].items():
-                    self.scopes[-1].set(k, v)
+                    if "." in k:
+                        self._assignDottedIdentifier(k, v)
+                    else:
+                        self.scopes[-1].set(k, v)
         return map
     def interpretString(self) -> dict:
         if self._isBaseLevel():
@@ -368,17 +428,18 @@ class Interpreter:
         result: list = []
         preserve_identifiers = False
         if self.current_call_target and self.current_call and self.current_call.get("current_interp_arg") is not None:
-            signature = inspect.signature(self.current_call_target["map"]["call"]["source"])
-            accepts_var_keyword = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
-            try:
-                parameter = signature.parameters[self.current_call["current_interp_arg"]]
-                accepted_types = self._expected_types_for_parameter(parameter)
-                preserve_identifiers = "idarray" in accepted_types or self._array_annotation_accepts_identifier_items(accepted_types)
-            except KeyError:
-                if accepts_var_keyword:
-                    preserve_identifiers = True
-                else:
-                    self.eh.throw("noMatchingParameter", f"'{self.current_call_target.get('name', 'object of type ' + self.current_call_target.get('type'))}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
+            if self.current_call_target["map"].get("call"):
+                signature = inspect.signature(self.current_call_target["map"]["call"]["source"])
+                accepts_var_keyword = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
+                try:
+                    parameter = signature.parameters[self.current_call["current_interp_arg"]]
+                    accepted_types = self._expected_types_for_parameter(parameter)
+                    preserve_identifiers = "idarray" in accepted_types or self._array_annotation_accepts_identifier_items(accepted_types)
+                except KeyError:
+                    if accepts_var_keyword:
+                        preserve_identifiers = True
+                    else:
+                        self.eh.throw("noMatchingParameter", f"'{self.current_call_target.get('name', 'object of type ' + self.current_call_target.get('type'))}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
         for item in self.current_ast["items"]:
             if preserve_identifiers and item.get("type") == "identifier":
                 result.append(item)
@@ -387,6 +448,8 @@ class Interpreter:
             result.append(self.interpret())
         array["items"] = result
         return array
+    def interpretFunction(self) -> dict:
+        return self.current_ast
     def interpretGroup(self) -> dict:
         group: dict = self.current_ast
         if group.get("value") is None:
@@ -399,6 +462,12 @@ class Interpreter:
         self.scopes.append(self.perkeo.res.Scope(self, "local", {}))
         return self.current_ast
     def interpretData(self) -> dict:
+        return self.current_ast
+    def interpretQuantity(self) -> dict:
+        return self.current_ast
+    def interpretClass(self) -> dict:
+        return self.current_ast
+    def interpretInstance(self) -> dict:
         return self.current_ast
     def interpretNull(self) -> dict:
         return self.current_ast

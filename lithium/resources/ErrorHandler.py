@@ -27,8 +27,8 @@ class ErrorHandler:
         print(f"* {Color.tomato}{message.replace('\n', '\n  ')}{Color.reset}")
         parts: tuple[str, str, str] = self.getParts(self.interpreter.current_ast["span"])
         print()
-        print(f"    {parts[0]}{Color.tomato}{parts[1]}{Color.reset}{parts[2]}")
-        print(f"    {Color.gray}{'-' * len(parts[0])}{Color.reset}{Color.tomato}{'~' * len(parts[1])}{Color.reset}{Color.gray}{'-' * len(parts[2])}{Color.reset}")
+        print(f"    {parts[0].lstrip()}{Color.tomato}{parts[1]}{Color.reset}{parts[2].rstrip()}")
+        print(f"    {Color.gray}{'-' * (len(parts[0].lstrip()))}{Color.reset}{Color.tomato}{'~' * len(parts[1])}{Color.reset}{Color.gray}{'-' * len(parts[2])}{Color.reset}")
         if not warning:
             sys.exit(1)
     def throwWithSpan(self, name: str, message: str, span: dict, warning: bool = False) -> None:
@@ -36,8 +36,7 @@ class ErrorHandler:
         print(":")
         print(f"* {Color.tomato}{message.replace('\n', '\n  ')}{Color.reset}")
         parts: tuple[str, str, str] = self.getParts(span)
-        print()
-        print(f"    {parts[0]}{Color.tomato}{parts[1]}{Color.reset}{parts[2]}")
-        print(f"    {Color.gray}{'-' * len(parts[0])}{Color.reset}{Color.tomato}{'~' * len(parts[1])}{Color.reset}{Color.gray}{'-' * len(parts[2])}{Color.reset}")
+        print(f"    {parts[0].lstrip()}{Color.tomato}{parts[1]}{Color.reset}{parts[2].rstrip()}")
+        print(f"    {Color.gray}{'-' * (len(parts[0].lstrip()))}{Color.reset}{Color.tomato}{'~' * len(parts[1])}{Color.reset}{Color.gray}{'-' * len(parts[2])}{Color.reset}")
         if not warning:
             sys.exit(1)

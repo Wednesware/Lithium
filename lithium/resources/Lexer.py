@@ -1,5 +1,8 @@
 type Token = any
 
+from decimal import Decimal
+
+
 class Lexer:
     SIMPLE_TOKENS = {
         "(": "LPAREN",
@@ -262,7 +265,7 @@ class Lexer:
 
         text = self.source[start:self.index]
         if is_float:
-            return self._token("FLOAT", float(text), start, line, column)
+            return self._token("FLOAT", Decimal(text), start, line, column)
         return self._token("INTEGER", int(text), start, line, column)
 
     def _identifier(self) -> Token:

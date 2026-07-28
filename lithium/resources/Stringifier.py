@@ -27,6 +27,12 @@ class Stringifier:
         return ast["value"]
     def stringifyUnit(self, ast: dict) -> str:
         return ast["value"]
+    def stringifyQuantity(self, ast: dict) -> str:
+        return f"{ast['value']}{ast['unit']}"
+    def stringifyClass(self, ast: dict) -> str:
+        return f"<class {ast['value']}>"
+    def stringifyInstance(self, ast: dict) -> str:
+        return f"<instance of {ast['value']}>"
 
     def _stringify_raw_value(self, value) -> str:
         if isinstance(value, dict):

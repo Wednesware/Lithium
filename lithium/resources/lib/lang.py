@@ -75,12 +75,12 @@ def _pko_length(interpreter, target, value: "array|string|map") -> dict: # type:
         "span": span,
     }
     
-def _pko_scopes(interpreter, target) -> dict: # type: ignore
-    span = interpreter.current_ast["span"]
-    return {
-        "type": "array",
-        "items": [{"type": "data", "source": scope, "map": {}, "span": span, "stringify": lambda x: f"<scope data at {hex(id(scope))}>"} for i, scope in enumerate(interpreter.scopes, start=1)],
-        "map": {},
-        "truthiness": lambda x: len(x.get("items", [])) > 0,
-        "span": span,
-    }
+def _pko_get(interpreter, target, value: "identifier|string", scope: "identifier|integer" = None) -> dict: # type: ignore
+    if scope is None:
+        return interpreter.findVariable(value["value"])
+    for i, iter_scope in enumerate(reversed(interpreter.scopes)):
+        if scope["type"] == "integer" and scope["value"] == i:
+            return iter_scope.get(value["value"])
+        if scope["type"] == "identifier" and scope:
+            return iter_scope.get(value["value"])
+    interpreter.eh.throw("scopeNotFound", f"scope '{scope['value']}' not found in the current context.", interpreter.current_ast["span"])

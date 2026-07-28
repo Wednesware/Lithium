@@ -18,3 +18,16 @@ def _pko_rmoutput(interpreter, target, value: "identifier") -> None: # type: ign
         
 def _pko_console(interpreter, target, value: "string|identifier") -> None: # type: ignore
     subprocess.run(value["value"], shell=True, check=True)
+    
+def _pko_scopes(interpreter, target) -> dict: # type: ignore
+    span = interpreter.current_ast["span"]
+    return {
+        "type": "array",
+        "items": [{"type": "data", "source": scope, "map": {}, "span": span, "stringify": lambda x: f"<{x['source'].name} scope data at {hex(id(x))}>"} for scope in interpreter.scopes],
+        "map": {},
+        "truthiness": lambda x: len(x.get("items", [])) > 0,
+        "span": span,
+    }
+    
+def _pko_visualise(interpreter, target, value: "data") -> None: # type: ignore
+    print(repr(value["source"]))
