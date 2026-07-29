@@ -1,9 +1,20 @@
 import sheet::pko.std
+import sheet::pko.stdunits
+import sheet::pko.advunits
 
 class Person -> (
-
+    fn constructor name::string age::integer -> (
+        me.name::name
+        me.age::age
+    )
 )
 
+class Student inherits::Person -> (
+    fn constructor name::string age::integer student_id::string -> (
+        me.student_id::student_id
+    )
+)
 
-print Person
-print (new Person)
+kassidy::new Person name::"Kassidy" age::20
+
+print kassidy.name, kassidy.age

@@ -129,7 +129,7 @@ class Parser:
         body: list[dict[str, any]] = []
 
         while not self._check("EOF"):
-            if self._match("NEWLINE", "SEMICOLON"):
+            if self._match("NEWLINE", "SEMICOLON", "COMMA"):
                 continue
             if self._check("COMMENT"):
                 comment = self._comment()
@@ -146,8 +146,12 @@ class Parser:
         stop = set(stop or ()) | self.LINE_ENDERS
         start = self._peek()
 
-        if self._looks_like_fn_declaration(stop):
+        if self._looks_like_for_or_call():
+            value = self._parse_for_or_call(stop)
+        elif self._looks_like_fn_declaration(stop):
             value = self._parse_fn_declaration_call(stop)
+        elif self._looks_like_variable_assignment_to_new_constructor():
+            value = self._parse_variable_assignment_to_new_constructor(stop)
         elif self._looks_like_kwarg():
             value = self._parse_argument_map(stop)
         else:
@@ -166,6 +170,69 @@ class Parser:
             )
 
         return self._node("line", self._span_from_nodes(start, value), value=value)
+
+    def _looks_like_for_or_call(self) -> bool:
+        return (
+            self._check("IDENTIFIER")
+            and self._peek().value == "for"
+            and self._peek(1).type == "IDENTIFIER"
+            and self._peek(1).value == "or"
+            and self._peek(2).type == "IDENTIFIER"
+            and self._peek(3).type == "IDENTIFIER"
+            and self._peek(3).value == "in"
+            and self._peek(4).type == "DOUBLE_COLON"
+        )
+
+    def _looks_like_variable_assignment_to_new_constructor(self) -> bool:
+        return (
+            self._check("IDENTIFIER")
+            and self._peek(1).type == "DOUBLE_COLON"
+            and self._peek(2).type == "IDENTIFIER"
+            and str(self._peek(2).value) == "new"
+        )
+
+    def _parse_variable_assignment_to_new_constructor(self, stop: set[str]) -> dict[str, any]:
+        key_token = self._consume("IDENTIFIER", "Expected variable name before '::'")
+        self._consume("DOUBLE_COLON", "Expected '::' after variable name")
+        new_token = self._consume("IDENTIFIER", "Expected 'new' after '::'")
+        if str(new_token.value) != "new":
+            self.eh.throwWithSpan("illegalSyntax", "expected 'new' after '::'", new_token.span)
+
+        args = self._parse_argument_map(stop)
+        value = self._call(self._node("identifier", new_token.span, value="new"), args)
+        result = self._new_map(self._span_from_nodes(key_token, value))
+        self._add_map_item(result, str(key_token.value), value)
+        return result
+
+    def _parse_for_or_call(self, stop: set[str]) -> dict[str, any]:
+        for_token = self._consume("IDENTIFIER", "Expected 'for'")
+        or_token = self._consume("IDENTIFIER", "Expected 'or' after 'for'")
+        index_token = self._consume("IDENTIFIER", "Expected index name after 'for or'")
+        self._consume("IDENTIFIER", "Expected 'in' after loop index")
+        self._consume("DOUBLE_COLON", "Expected '::' after 'in'")
+
+        if self._at_stop(stop | {"ARROW"}) or not self._starts_value():
+            self.eh.throwWithSpan("expectedValue", "expected iterable after 'in::'", self._peek().span)
+
+        iterable = self.parse_expression(
+            stop=stop | {"ARROW"},
+            allow_implicit_call=False,
+            allow_arrow=False,
+        )
+        if not self._check("ARROW"):
+            self.eh.throwWithSpan("expectedArrow", "expected '->' after loop iterable", self._peek().span)
+        block = self._parse_arrow_block()
+
+        args = self._new_map(self._span_from_node_list(for_token, block))
+        self._add_positional(args, self._node("identifier", or_token.span, value="or"))
+        self._add_positional(args, self._node("identifier", index_token.span, value=index_token.value))
+        self._add_positional(args, block)
+        self._add_map_item(args, "in", iterable)
+        return self._call(
+            self._node("identifier", for_token.span, value="for"),
+            args,
+            end_token=block,
+        )
 
     def _looks_like_fn_declaration(self, stop: set[str]) -> bool:
         if not self._check("IDENTIFIER"):
@@ -360,7 +427,7 @@ class Parser:
             token = self._peek()
             precedence = self._infix_priority_for_symbol(str(token.value))
             if precedence is None:
-                return None
+                precedence = 3
             if not self._starts_value_at_offset(1):
                 return None
             return token, precedence, True
@@ -452,7 +519,7 @@ class Parser:
             self._add_positional(args, value)
 
             while not self._check("RPAREN", "EOF"):
-                if self._match("NEWLINE", "SEMICOLON"):
+                if self._match("NEWLINE", "SEMICOLON", "COMMA"):
                     continue
                 if self._check("COMMENT"):
                     comment = self._comment()
@@ -479,7 +546,7 @@ class Parser:
         items: list[dict[str, any]] = []
 
         while not self._check("RBRACKET", "EOF"):
-            if self._match("NEWLINE", "SEMICOLON"):
+            if self._match("NEWLINE", "SEMICOLON", "COMMA"):
                 continue
             if self._check("COMMENT"):
                 comment = self._comment()
@@ -501,7 +568,7 @@ class Parser:
         result = self._new_map(open_token.span)
 
         while not self._check("RBRACE", "EOF"):
-            if self._match("NEWLINE", "SEMICOLON"):
+            if self._match("NEWLINE", "SEMICOLON", "COMMA"):
                 continue
             if self._check("COMMENT"):
                 self._add_comment(result, self._comment())
@@ -528,6 +595,8 @@ class Parser:
         result = self._new_map(start.span)
 
         while not self._at_stop(stop):
+            if self._match("COMMA"):
+                continue
             if self._match("NEWLINE", "SEMICOLON"):
                 if "NEWLINE" in stop or "SEMICOLON" in stop:
                     self.index -= 1
@@ -537,6 +606,7 @@ class Parser:
                 self._add_comment(result, self._comment())
                 continue
             if self._looks_like_kwarg():
+                self._expand_unparenthesized_operator_value(result)
                 if self._parse_kwarg_into_trailing_call(result, stop=stop):
                     continue
                 self._parse_kwarg_into(result, stop=stop)
@@ -547,12 +617,15 @@ class Parser:
             if not self._starts_value():
                 break
 
-            # Keep keyword arguments attached to the current call instead of
-            # being absorbed into an implicit nested call.
-            # Parenthesized arguments are explicitly grouped, so they may still
-            # contain an implicit call like `(stringify 5..=4)`.
-            allow_implicit_call = self._check("LPAREN")
+            # The first bare identifier value may be an implicit nested call:
+            # `print ast 3` is equivalent to `print (ast 3)`. Later values
+            # remain separate unless explicitly grouped or comma-delimited.
+            allow_implicit_call = self._check("LPAREN") or (
+                not self._get_positional_items(result)
+                and not self._starts_identifier_before_kwarg()
+            )
             value = self.parse_expression(stop=stop | {"ARROW"}, allow_implicit_call=allow_implicit_call)
+            self._mark_unparenthesized_operator_value(value)
             self._add_positional(result, value)
 
         if not result["map"] and not result.get("comments"):
@@ -561,6 +634,44 @@ class Parser:
             last = self._previous()
             result["span"] = self._span_between(start, last)
         return result
+
+    def _mark_unparenthesized_operator_value(self, value: dict[str, any]) -> None:
+        expanded_items = self._operator_expression_items(value)
+        if len(expanded_items) > 1:
+            value["unparenthesized_items"] = expanded_items
+
+    def _starts_identifier_before_kwarg(self) -> bool:
+        return (
+            self._check("IDENTIFIER")
+            and self._peek(1).type == "IDENTIFIER"
+            and self._peek(2).type == "DOUBLE_COLON"
+        )
+
+    def _expand_unparenthesized_operator_value(self, result: dict[str, any]) -> None:
+        positional_items = self._get_positional_items(result)
+        if len(positional_items) != 1:
+            return
+
+        expanded_items = positional_items[0].get("unparenthesized_items", [])
+        if len(expanded_items) <= 1:
+            return
+        self._set_positional_items(result, expanded_items)
+
+    def _operator_expression_items(self, value: dict[str, any]) -> list[dict[str, any]]:
+        if value.get("type") != "call":
+            return [value]
+        target = value.get("target", {})
+        if target.get("type") != "operator":
+            return [value]
+
+        operands = self._get_positional_items(value.get("args", {}))
+        if len(operands) != 2:
+            return [value]
+        return (
+            self._operator_expression_items(operands[0])
+            + [target]
+            + self._operator_expression_items(operands[1])
+        )
 
     def _parse_kwarg_into_trailing_call(self, result: dict[str, any], stop: set[str]) -> bool:
         positional_items = self._get_positional_items(result)

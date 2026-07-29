@@ -11,10 +11,11 @@ class Lexer:
         "}": "RBRACE",
         "[": "LBRACKET",
         "]": "RBRACKET",
+        ",": "COMMA",
         ";": "SEMICOLON",
     }
 
-    OPERATOR_CHARS = set("+-*/%=!<>|&^~?.,:@$")
+    OPERATOR_CHARS = set("+-*/%=!<>|&^~?.:@$")
 
     def __init__(self, perkeo, source: str):
         self.perkeo = perkeo

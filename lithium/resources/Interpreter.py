@@ -33,8 +33,6 @@ class Interpreter:
         }
         for operator_name, source_name in self.perkeo.res.Builtins.OPERATOR_BUILTINS.items():
             builtins[operator_name] = self.perkeo.res.Builtins.getOperatorASTOf(self, operator_name, source_name)
-        for unit_name in self.perkeo.res.Builtins.UNIT_DEFS:
-            builtins[unit_name] = self.perkeo.res.Builtins.getUnitASTOf(self, unit_name, source=self.perkeo.res.Builtins.unitCall)
         self.scopes: list = [
             self.perkeo.res.Scope(self, "global", builtins)
         ]
@@ -71,7 +69,9 @@ class Interpreter:
             owner = owner.get("map", {}).get(part)
         if not isinstance(owner, dict) or not isinstance(owner.get("map"), dict):
             return None
-        return self.perkeo.res.Scope(self, "instance", owner["map"])
+        members = owner["map"].copy()
+        members["me"] = owner
+        return self.perkeo.res.Scope(self, "instance", members)
     def _assignDottedIdentifier(self, ident: str, value: dict) -> None:
         parts = ident.split(".")
         owner = self.findVariable(parts[0], error=False)
@@ -286,7 +286,10 @@ class Interpreter:
         self.current_ast = self.current_ast["target"]
         target = self.interpret()
         self.current_call_target = target
-        self.current_ast = call["args"]
+        args_ast = call["args"]
+        if self._targetAcceptsKeywordArguments(target):
+            args_ast = self._expandUnparenthesizedValue(args_ast)
+        self.current_ast = args_ast
         args: dict = self.interpret()
         self.current_call = None
         self.current_call_target = None
@@ -356,6 +359,47 @@ class Interpreter:
             return {"type": "null", "map": {}, "span": call["span"]} if return_value is None else return_value
         else:
             self.eh.throw("notCallable", f"object of type '{target['type']}' is not callable.")
+
+    def _targetAcceptsKeywordArguments(self, target: dict) -> bool:
+        declared_params = target.get("params") if isinstance(target, dict) else None
+        if isinstance(declared_params, list):
+            return any(parameter_name != "value" for parameter_name, _ in declared_params)
+
+        source = target.get("map", {}).get("call", {}).get("source") if isinstance(target, dict) else None
+        if not callable(source):
+            return False
+        parameters = list(inspect.signature(source).parameters.values())[2:]
+        return any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            or (
+                parameter.name.removeprefix("arg_") != "value"
+                and parameter.kind in {
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                }
+            )
+            for parameter in parameters
+        )
+
+    def _expandUnparenthesizedValue(self, args_ast: dict) -> dict:
+        value = args_ast.get("map", {}).get("value")
+        if not isinstance(value, dict):
+            return args_ast
+        items = value.get("unparenthesized_items")
+        if not isinstance(items, list) or len(items) <= 1:
+            return args_ast
+
+        expanded_args = copy.deepcopy(args_ast)
+        expanded_value = expanded_args["map"]["value"]
+        expanded_value["type"] = "array"
+        expanded_value["items"] = expanded_value.pop("unparenthesized_items")
+        expanded_value["is_argument_pack"] = True
+        expanded_value.pop("target", None)
+        expanded_value.pop("args", None)
+        expanded_value.pop("operator_syntax", None)
+        expanded_value.pop("unit_syntax", None)
+        return expanded_args
     def interpretIdentifier(self) -> dict:
         if self.current_call_target and self.current_call and self.current_call.get("current_interp_arg") is not None:
             if self.current_call_target["map"].get("call"):

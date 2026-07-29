@@ -64,6 +64,24 @@ is equivalent to:
 string [4, 5]
 ```
 
+For a function whose only parameter is `value`, an unparenthesized operator
+expression is evaluated as that value:
+
+```perkeo
+print 3 + 2
+```
+
+To pass separate values, use commas. Commas also separate array entries:
+
+```perkeo
+print 3, +, 2
+print [3, +, 2]
+```
+
+Calls that accept keyword parameters preserve an unparenthesized operator
+sequence as positional values. For example, `fn_with_kw 3 + 2 myarg::4` receives
+`value::[3 + 2]` and `myarg::4`; parenthesize the expression to pass its result.
+
 ---
 
 ### Named Arguments
@@ -279,6 +297,83 @@ class Person -> (
 ```
 
 Objects created from classes are still maps internally.
+
+### Constructors
+
+Declare a class-local `constructor` function to initialize each instance. `new`
+passes its keyword arguments to that function, and `me` refers to the new
+instance.
+
+```perkeo
+class Person -> (
+    fn constructor name::string -> (
+        me.name::name
+    )
+)
+
+person::(new Person name::"Ada")
+```
+
+### Custom Units
+
+`pko.std` exports the `unit` base class. A unit class uses `scale` in the form
+`[numerator:denominator referenceUnit]`: one new unit equals that fraction of
+the reference unit.
+
+```perkeo
+class ft inherits::unit -> (
+    scale::[1:1 m]
+)
+
+class inch inherits::unit -> (
+    scale::[1:12 ft]
+)
+
+print (12inch to ft)
+```
+
+### Unit Libraries
+
+Unit families are imported explicitly and can be combined in one program:
+
+```perkeo
+import pko.metric.ALL
+import pko.imperial.ALL
+import pko.ui.ALL
+import pko.computer.ALL
+```
+
+`pko.metric` includes SI prefixes plus area and volume units such as `m2`,
+`cm2`, `m3`, `L`, and `mL`. `pko.imperial` includes `inch`, `ft`, `yd`, `mi`,
+`mile`, `acre`, `gal`, `lb`, and related customary units. `pko.ui` supplies
+display units including `px`, `dp`, `sp`, `em`, `rem`, `csspt`, `ppi`, `dpi`,
+and `mp`. `pko.computer` supplies decimal and binary information units from
+`bit` and `byte` through `TB` and `TiB`.
+
+```perkeo
+print (10000cm2 to m2)
+print (12inch to ft)
+print (2rem to px)
+print (1MiB to bytes)
+```
+
+### Custom Operators
+
+`pko.std` also exports the `operator` base class. Define a symbolic `symbol`
+and an `apply` function with two parameters. User-defined symbols use the same
+precedence as `+` and `-`.
+
+```perkeo
+class Sum inherits::operator -> (
+    symbol::"%%"
+
+    fn apply left::integer right::integer -> (
+        left + right
+    )
+)
+
+print (2 %% 3)
+```
 
 ---
 

@@ -71,6 +71,42 @@ def _pko_while(interpreter, target, value: "array") -> dict:  # type: ignore
     return {"type": "null", "map": {}, "span": block["span"]}
 
 
-def _pko_for(interpreter, iterable, value: "identifier|block"):
-    for item in iterable:
-        interpreter.call_function(callback, [item])
+def _pko_for(interpreter, target, value: "array[identifier block]", **kwargs) -> dict:  # type: ignore
+    iterable = kwargs.get("in")
+    if iterable is None:
+        interpreter.eh.throw("tooFewArguments", "'for' expects an iterable passed with 'in::'.")
+    if iterable.get("type") == "identifier":
+        iterable = interpreter.findVariable(iterable["value"])
+    items = value.get("items", []) if isinstance(value, dict) else []
+    if len(items) != 3 or items[0].get("value") != "or" or items[1].get("type") != "identifier" or items[2].get("type") != "block":
+        interpreter.eh.throw("invalidFor", "'for' expects `for or index in::iterable -> (...)`.")
+    if iterable.get("type") not in {"array", "string", "map"}:
+        interpreter.eh.throw("typeError", "'for' expects an array, string, or map for 'in::'.")
+
+    index_name = items[1]["value"]
+    block = items[2]
+    if iterable["type"] == "array":
+        length = len(iterable.get("items", []))
+    elif iterable["type"] == "string":
+        length = len(iterable.get("value", ""))
+    else:
+        length = len(iterable.get("map", {}))
+
+    previous_ast = interpreter.current_ast
+    for index in range(length):
+        interpreter.scopes.append(interpreter.perkeo.res.Scope(interpreter, "for", {
+            index_name: {
+                "type": "integer",
+                "value": index,
+                "map": {},
+                "truthiness": lambda node: bool(node["value"]),
+                "span": items[1]["span"],
+            },
+        }))
+        try:
+            _run_block(interpreter, copy.deepcopy(block))
+        finally:
+            interpreter.scopes.pop()
+
+    interpreter.current_ast = previous_ast
+    return {"type": "null", "map": {}, "span": block["span"]}

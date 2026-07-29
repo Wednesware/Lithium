@@ -60,23 +60,7 @@ class Builtins:
         "at": 2,
         "to": 2,
     }
-    UNIT_DEFS: dict[str, tuple[str, "Decimal | None"]] = {
-        "mm": ("length", Decimal("0.001")),
-        "cm": ("length", Decimal("0.01")),
-        "dm": ("length", Decimal("0.1")),
-        "m": ("length", Decimal("1")),
-        "km": ("length", Decimal("1000")),
-        "mg": ("mass", Decimal("0.001")),
-        "g": ("mass", Decimal("1")),
-        "kg": ("mass", Decimal("1000")),
-        "ms": ("time", Decimal("0.001")),
-        "s": ("time", Decimal("1")),
-        "min": ("time", Decimal("60")),
-        "h": ("time", Decimal("3600")),
-        "C": ("temperature", None),
-        "F": ("temperature", None),
-        "K": ("temperature", None),
-    }
+    UNIT_DEFS: dict[str, tuple[str, "Decimal | None"]] = {}
 
     @staticmethod
     def _callablePriority(source: callable | None, default: int | None = None) -> int | None:
@@ -276,6 +260,25 @@ class Builtins:
     @staticmethod
     def _loadPyExports(module, span: dict, interpreter) -> dict[str, dict]:
         exports: dict[str, dict] = {}
+        unit_definitions = getattr(module, "_PKO_UNIT_DEFS", None)
+        if isinstance(unit_definitions, dict):
+            registered_units = Builtins._unitDefs(interpreter)
+            for unit_name, unit_definition in unit_definitions.items():
+                if not (
+                    isinstance(unit_name, str)
+                    and isinstance(unit_definition, tuple)
+                    and len(unit_definition) == 2
+                ):
+                    continue
+                dimension, factor = unit_definition
+                if not isinstance(dimension, str) or not isinstance(factor, (Decimal, type(None))):
+                    continue
+                registered_units[unit_name] = (dimension, factor)
+                exports[unit_name] = Builtins.getUnitASTOf(
+                    interpreter,
+                    unit_name,
+                    source=Builtins.unitCall,
+                )
         for key, value in vars(module).items():
             if not key.startswith("_pko_"):
                 continue
@@ -500,13 +503,33 @@ class Builtins:
     @staticmethod
     def at(interpreter, target, value: "array") -> dict: # type: ignore
         left, right = Builtins._binaryItems(interpreter, value)
-        if left.get("type") != "array":
-            interpreter.eh.throw("expectedArray", f"expected array for 'at' operator, got {left.get('type')!r}")
-        index = Builtins._asNumber(interpreter, right)
-        items = left.get("items", [])
-        if not isinstance(index, int) or index < 0 or index >= len(items):
-            interpreter.eh.throw("indexOutOfBounds", f"index {index} is out of bounds for array of length {len(items)}")
-        return items[index]
+        left_type = left.get("type")
+        if left_type == "array":
+            index = Builtins._asNumber(interpreter, right)
+            items = left.get("items", [])
+            if not isinstance(index, int) or index < 0 or index >= len(items):
+                interpreter.eh.throw("indexOutOfBounds", f"index {index} is out of bounds for array of length {len(items)}")
+            return items[index]
+        if left_type == "string":
+            index = Builtins._asNumber(interpreter, right)
+            text = left.get("value", "")
+            if not isinstance(index, int) or index < 0 or index >= len(text):
+                interpreter.eh.throw("indexOutOfBounds", f"index {index} is out of bounds for string of length {len(text)}")
+            return {
+                "type": "string",
+                "value": text[index],
+                "map": {},
+                "truthiness": lambda node: bool(node["value"]),
+                "span": value["span"],
+            }
+        if left_type == "map":
+            if right.get("type") != "string":
+                interpreter.eh.throw("typeError", f"map index must be a string, not {right.get('type')!r}")
+            key = right["value"]
+            if key not in left.get("map", {}):
+                interpreter.eh.throw("keyNotFound", f"map has no key {key!r}")
+            return left["map"][key]
+        interpreter.eh.throw("notIndexable", f"cannot index value of type {left_type!r}")
         
     
     @staticmethod
@@ -566,12 +589,18 @@ class Builtins:
         }
 
     @staticmethod
-    def _unitDimension(unit_name: str) -> str | None:
-        info = Builtins.UNIT_DEFS.get(unit_name)
+    def _unitDefs(interpreter) -> dict[str, tuple[str, "Decimal | None"]]:
+        if not hasattr(interpreter, "unit_defs"):
+            interpreter.unit_defs = copy.deepcopy(Builtins.UNIT_DEFS)
+        return interpreter.unit_defs
+
+    @staticmethod
+    def _unitDimension(interpreter, unit_name: str) -> str | None:
+        info = Builtins._unitDefs(interpreter).get(unit_name)
         return info[0] if info else None
 
     @staticmethod
-    def _toBaseUnit(dimension: str, unit_name: str, value: Decimal) -> Decimal:
+    def _toBaseUnit(interpreter, dimension: str, unit_name: str, value: Decimal) -> Decimal:
         if dimension == "temperature":
             if unit_name == "C":
                 return value
@@ -579,11 +608,11 @@ class Builtins:
                 return (value - 32) * Decimal(5) / Decimal(9)
             if unit_name == "K":
                 return value - Decimal("273.15")
-        factor = Builtins.UNIT_DEFS[unit_name][1]
+        factor = Builtins._unitDefs(interpreter)[unit_name][1]
         return value * factor
 
     @staticmethod
-    def _fromBaseUnit(dimension: str, unit_name: str, base_value: Decimal) -> Decimal:
+    def _fromBaseUnit(interpreter, dimension: str, unit_name: str, base_value: Decimal) -> Decimal:
         if dimension == "temperature":
             if unit_name == "C":
                 return base_value
@@ -591,7 +620,7 @@ class Builtins:
                 return base_value * Decimal(9) / Decimal(5) + 32
             if unit_name == "K":
                 return base_value + Decimal("273.15")
-        factor = Builtins.UNIT_DEFS[unit_name][1]
+        factor = Builtins._unitDefs(interpreter)[unit_name][1]
         return base_value / factor
 
     @staticmethod
@@ -619,7 +648,7 @@ class Builtins:
     @staticmethod
     def unitCall(interpreter, target, value: "integer|float") -> dict: # type: ignore
         unit_name = target["value"]
-        if unit_name not in Builtins.UNIT_DEFS:
+        if unit_name not in Builtins._unitDefs(interpreter):
             interpreter.eh.throw("unknownUnit", f"unknown unit '{unit_name}'")
         return Builtins._makeQuantity(value["value"], unit_name, value["span"])
 
@@ -636,16 +665,16 @@ class Builtins:
             interpreter.eh.throw("typeError", f"'to' expects a unit on the right-hand side, got {right.get('type')!r}")
 
         source_unit = left["unit"]
-        source_dim = Builtins._unitDimension(source_unit)
-        target_dim = Builtins._unitDimension(target_unit)
+        source_dim = Builtins._unitDimension(interpreter, source_unit)
+        target_dim = Builtins._unitDimension(interpreter, target_unit)
         if source_dim is None or target_dim is None:
             interpreter.eh.throw("unknownUnit", f"unknown unit in conversion: '{source_unit}' to '{target_unit}'")
         if source_dim != target_dim:
             interpreter.eh.throw("incompatibleUnits", f"cannot convert '{source_unit}' ({source_dim}) to '{target_unit}' ({target_dim})")
 
         source_value = Builtins._asDecimal(left["value"])
-        base_value = Builtins._toBaseUnit(source_dim, source_unit, source_value)
-        converted_value = Builtins._fromBaseUnit(target_dim, target_unit, base_value)
+        base_value = Builtins._toBaseUnit(interpreter, source_dim, source_unit, source_value)
+        converted_value = Builtins._fromBaseUnit(interpreter, target_dim, target_unit, base_value)
         return Builtins._makeQuantity(Builtins._normalizeQuantityValue(converted_value), target_unit, value["span"])
 
 
@@ -725,6 +754,7 @@ class Builtins:
 
         fn_ast = Builtins.getASTOf(interpreter, function_name, source=runtime_fn)
         fn_ast["span"] = name["span"]
+        fn_ast["params"] = declared_params
         interpreter.scopes[-1].set(function_name, fn_ast)
         return fn_ast
 
