@@ -71,6 +71,6 @@ def _pko_while(interpreter, target, value: "array") -> dict:  # type: ignore
     return {"type": "null", "map": {}, "span": block["span"]}
 
 
-def _pko_for(interpreter, iterable, callback):
+def _pko_for(interpreter, iterable, value: "identifier|block"):
     for item in iterable:
         interpreter.call_function(callback, [item])

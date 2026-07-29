@@ -1,5 +1,9 @@
 import sheet::pko.std
 
-print (["a", "b", "c"] at 3)
+class Person -> (
 
-// TODO: fix the array indexing
+)
+
+
+print Person
+print (new Person)

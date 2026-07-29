@@ -5,18 +5,6 @@ def _pko_class(interpreter, target, value: "array|idarray", inherits: "any" = No
     span = value["span"] if isinstance(value, dict) and "span" in value else interpreter.current_ast["span"]
     name: str = value["items"][0]["value"]
     block = value["items"][1]
-
-    # `value`'s block item was already evaluated (via interpretArray ->
-    # interpretBlock) before this function ran, which pushed a fresh local
-    # scope onto the stack. Reuse that same scope as the class body's own
-    # scope: run the body statements now (so `fn` declarations and field
-    # assignments land in it), then pop it and keep its vars as the class map.
-    #
-    # Note: evaluating block-typed call arguments (e.g. `fn`'s `body` param)
-    # pushes its own scope during argument evaluation and never pops it, so
-    # method declarations inside the class body actually land on that
-    # trailing "stray" scope rather than class_scope itself. Merge every
-    # scope appended from class_scope onward, then drop them all.
     class_scope = interpreter.scopes[-1]
     class_scope_index = len(interpreter.scopes) - 1
     previous_ast = interpreter.current_ast

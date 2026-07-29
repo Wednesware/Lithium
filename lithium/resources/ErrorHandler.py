@@ -17,7 +17,7 @@ class ErrorHandler:
         if len(self.interpreter.perkeo.source.splitlines()):
             line: str = self.interpreter.perkeo.source.splitlines()[span['line'] - 1]
         return (
-            f"{line[0:span['column'] - 1]}",
+            f"{line[:span['column'] - 1]}",
             f"{line[span['column'] - 1:span['end_column'] - 1]}",
             f"{line[span['end_column'] - 1:len(line)]}"
         )

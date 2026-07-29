@@ -84,3 +84,12 @@ def _pko_get(interpreter, target, value: "identifier|string", scope: "identifier
         if scope["type"] == "identifier" and scope:
             return iter_scope.get(value["value"])
     interpreter.eh.throw("scopeNotFound", f"scope '{scope['value']}' not found in the current context.", interpreter.current_ast["span"])
+    
+def _pko_global(interpreter, target, **kwargs) -> dict: # type: ignore
+    interpreter.scopes[0].vars |= kwargs
+    
+def _pko_local(interpreter, target, value: "integer" = None, **kwargs) -> dict: # type: ignore
+    try:
+        interpreter.scopes[-1 - (value["value"] or 1)].vars |= kwargs
+    except IndexError:
+        interpreter.eh.throw("scopeNotFound", "cannot jump that far.", interpreter.current_ast["span"])
