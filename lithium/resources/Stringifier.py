@@ -81,7 +81,7 @@ class Stringifier:
                 result.append(Stringifier._quote(item["value"]))
             else:
                 result.append(self.stringify(item))
-        return f"[{' '.join(result)}]"
+        return f"[{', '.join(result)}]"
     def stringifyFunction(self, ast: dict) -> str:
         return f"<function {ast['name']}>"
     def stringifyData(self, ast: dict) -> str:

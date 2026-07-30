@@ -117,17 +117,20 @@ def _pko_class(interpreter, target, value: "array|idarray", inherits: "any" = No
     del interpreter.scopes[class_scope_index:]
 
     combined_map: dict = {}
+    parents: list = []
     for parent in interpreter.perkeo.res.Builtins._classParents(inherits):
         if not isinstance(parent, dict) or parent.get("type") != "class":
             parent_type = parent.get("type") if isinstance(parent, dict) else type(parent).__name__
             interpreter.eh.throw("typeError", f"'inherits' expects class values, got {parent_type!r}")
         combined_map.update(copy.deepcopy(parent.get("map", {})))
+        parents.append(parent)
     combined_map.update(own_map)
 
     class_ast = {
         "type": "class",
         "value": name,
         "map": combined_map,
+        "parents": parents,
         "truthiness": lambda x: True,
         "span": span,
     }
@@ -163,8 +166,10 @@ def _pko_new(interpreter, target, value: "identifier|string", **kwargs) -> dict:
     if not isinstance(constructor, dict) or constructor.get("type") != "function":
         interpreter.eh.throw("invalidConstructor", f"'{class_name}.constructor' must be a function.")
 
+    parents = class_data.get("parents") or []
     members = instance["map"].copy()
     members["me"] = instance
+    members["parent"] = parents[0] if parents else class_data
     interpreter.scopes.insert(0, interpreter.perkeo.res.Scope(interpreter, "instance", members))
     try:
         constructor["map"]["call"]["source"](interpreter, constructor, **kwargs)

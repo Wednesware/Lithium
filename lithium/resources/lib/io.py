@@ -2,7 +2,7 @@ import os, subprocess
 
 
 def _pko_print(interpreter, target, value: "any" = None) -> None: # type: ignore
-    string_value = interpreter.stringifier.stringify(value) if value is not None else ""
+    string_value = ((" ".join([interpreter.stringifier.stringify(array) for array in value["items"]])) if value["type"] == "array" else interpreter.stringifier.stringify(value)) if value is not None else ""
     print(string_value)
 def _pko_send(interpreter, target, value: "any" = None, to: "string" = None, display: "boolean" = None) -> None: # type: ignore
     string_value = interpreter.stringifier.stringify(value, allow_custom_stringification=display["value"] if display is not None else True) if value is not None else ""

@@ -544,21 +544,34 @@ class Parser:
     def _parse_array(self) -> dict[str, any]:
         open_token = self._consume("LBRACKET", "Expected '['")
         items: list[dict[str, any]] = []
+        expect_separator = False
 
         while not self._check("RBRACKET", "EOF"):
             if self._match("NEWLINE", "SEMICOLON", "COMMA"):
+                expect_separator = False
                 continue
             if self._check("COMMENT"):
                 comment = self._comment()
                 if comment is not None:
                     items.append(comment)
                 continue
+            if expect_separator:
+                token = self._peek()
+                self.eh.throwWithSpan(
+                    "expectedComma",
+                    "expected ',' between array items",
+                    token.span,
+                )
+            # Array items require a comma (or line break) between them, so
+            # each item may itself use implicit-call syntax without ambiguity,
+            # e.g. `[ast print, ast kassidy]` calls `ast` with `print`/`kassidy`.
             items.append(
                 self.parse_expression(
-                    stop={"NEWLINE", "SEMICOLON", "RBRACKET", "EOF"},
-                    allow_implicit_call=False,
+                    stop={"NEWLINE", "SEMICOLON", "COMMA", "RBRACKET", "EOF"},
+                    allow_implicit_call=True,
                 )
             )
+            expect_separator = True
 
         close_token = self._consume("RBRACKET", "Expected ']' after array")
         return self._node("array", self._span_between(open_token, close_token), items=items)
@@ -593,9 +606,11 @@ class Parser:
     def _parse_argument_map(self, stop: set[str]) -> dict[str, any]:
         start = self._peek()
         result = self._new_map(start.span)
+        saw_comma = False
 
         while not self._at_stop(stop):
             if self._match("COMMA"):
+                saw_comma = True
                 continue
             if self._match("NEWLINE", "SEMICOLON"):
                 if "NEWLINE" in stop or "SEMICOLON" in stop:
@@ -606,6 +621,13 @@ class Parser:
                 self._add_comment(result, self._comment())
                 continue
             if self._looks_like_kwarg():
+                if saw_comma:
+                    token = self._peek()
+                    self.eh.throwWithSpan(
+                        "commaPositionalWithKeyword",
+                        "comma-separated positional arguments cannot be mixed with keyword arguments; wrap them in '[...]' instead.",
+                        token.span,
+                    )
                 self._expand_unparenthesized_operator_value(result)
                 if self._parse_kwarg_into_trailing_call(result, stop=stop):
                     continue
@@ -618,8 +640,9 @@ class Parser:
                 break
 
             # The first bare identifier value may be an implicit nested call:
-            # `print ast 3` is equivalent to `print (ast 3)`. Later values
-            # remain separate unless explicitly grouped or comma-delimited.
+            # `print type 210cm` is equivalent to `print (type 210cm)`. A
+            # comma explicitly separates positional arguments into a list
+            # instead (e.g. `print type, 210cm` prints both values as-is).
             allow_implicit_call = self._check("LPAREN") or (
                 not self._get_positional_items(result)
                 and not self._starts_identifier_before_kwarg()

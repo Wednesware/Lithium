@@ -50,12 +50,6 @@ class Interpreter:
         if error:
             self.eh.throw("scopeError", f"identifier '{ident}' is not associated with a value in any scope.")
     def _instanceScopeForCallTarget(self, target_ast: dict):
-        # Methods are stored as plain function values inside a class/instance
-        # map and don't carry an implicit "self" binding. When a call target
-        # is a dotted identifier (e.g. `fido.speak`), expose the owning
-        # instance/class's fields as an extra scope for the duration of the
-        # call so bare identifiers in the method body (e.g. `sound`) resolve
-        # to the instance's own fields via the existing dynamic-scoping rules.
         if not isinstance(target_ast, dict) or target_ast.get("type") != "identifier":
             return None
         ident = str(target_ast.get("value", ""))
@@ -70,7 +64,13 @@ class Interpreter:
         if not isinstance(owner, dict) or not isinstance(owner.get("map"), dict):
             return None
         members = owner["map"].copy()
-        members["me"] = owner
+        # When forwarding through a class reference (e.g. `parent.constructor`
+        # inside a subclass constructor), keep the current `me` binding intact
+        # instead of rebinding it to the class itself; the real instance's
+        # scope is still further down the scope stack and will be found by
+        # the flat linear scan in findVariable.
+        if owner.get("type") != "class":
+            members["me"] = owner
         return self.perkeo.res.Scope(self, "instance", members)
     def _assignDottedIdentifier(self, ident: str, value: dict) -> None:
         parts = ident.split(".")
@@ -358,6 +358,7 @@ class Interpreter:
                 self.current_raw_call_args = previous_raw_call_args
             return {"type": "null", "map": {}, "span": call["span"]} if return_value is None else return_value
         else:
+            print(target)
             self.eh.throw("notCallable", f"object of type '{target['type']}' is not callable.")
 
     def _targetAcceptsKeywordArguments(self, target: dict) -> bool:
@@ -412,6 +413,19 @@ class Interpreter:
                         return self.current_ast
                 except KeyError:
                     if accepts_var_keyword:
+                        declared_params = self.current_call_target.get("params")
+                        if isinstance(declared_params, list):
+                            declared_type = next(
+                                (
+                                    type_name
+                                    for param_name, type_name in declared_params
+                                    if param_name == self.current_call["current_interp_arg"]
+                                ),
+                                None,
+                            )
+                            if declared_type is not None and declared_type not in ("identifier", "idarray"):
+                                dotted_match = self._resolve_dotted_identifier(self.current_ast["value"])
+                                return dotted_match if dotted_match is not None else self.findVariable(self.current_ast["value"])
                         return self.current_ast
                     self.eh.throw("noMatchingParameter", f"'{self.current_call_target['name']}' does not have a parameter matching '{self.current_call['current_interp_arg']}'")
         dotted_match = self._resolve_dotted_identifier(self.current_ast["value"])
