@@ -1,0 +1,7 @@
+import sheet::pko.std
+import sheet::pko.stdunits
+import sheet::pko.advunits
+
+post "echo hi"
+
+print 99%+2

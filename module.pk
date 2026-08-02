@@ -1,0 +1,6 @@
+import pko.io.print
+
+name::"Kass"
+age::14
+
+export name age
