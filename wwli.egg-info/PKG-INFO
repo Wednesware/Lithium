@@ -1,0 +1,29 @@
+Metadata-Version: 2.4
+Name: wwli
+Version: 26.1
+Summary: Official built-in compiler for the Perkeo programming language.
+Home-page: https://wednesware.org/lithium
+Author: Wednesware
+Author-email: team@wednesware.org
+License: MIT
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE.md
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: license
+Dynamic: license-file
+Dynamic: requires-python
+Dynamic: summary
+
+# Wednesware Lithium
+
+Official built-in compiler for the Perkeo programming language.
+
+See [PERKEO.md](PERKEO.md) for info about Perkeo.

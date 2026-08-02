@@ -1,5 +1,4 @@
-import copy
-import inspect, os
+import inspect, os, subprocess, copy
 from decimal import Decimal
 
 
@@ -41,6 +40,8 @@ class Interpreter:
     def runCode(self) -> None:
         self.current_ast = self.perkeo.full_ast
         self.interpret()
+        for post in self.posts:
+            subprocess.run(post, shell=True, check=True)
     def findVariable(self, ident: str, scopes: list[str] | None = None, error: bool = True) -> any:
         for scope in self.scopes:
             if scopes is not None and scope.name not in scopes:

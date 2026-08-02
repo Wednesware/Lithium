@@ -2,8 +2,6 @@ import sheet::pko.std
 import sheet::pko.stdunits
 import sheet::pko.advunits
 
-print 210cm to m
+post "echo hi"
 
-print type type type 210cm
-
-print [2cm to m, m]
+print 99%+2

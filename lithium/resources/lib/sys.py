@@ -31,3 +31,6 @@ def _pko_scopes(interpreter, target) -> dict: # type: ignore
     
 def _pko_visualise(interpreter, target, value: "data") -> None: # type: ignore
     print(repr(value["source"]))
+    
+def _pko_post(interpreter, target, value: "string") -> None: # type: ignore
+    interpreter.posts.append(value["value"])
